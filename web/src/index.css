@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
+
+  /* Canalis brand: deep slate canvas, violet "channel" accent. */
+  --color-canvas: #0a0b0f;
+  --color-surface: #121319;
+  --color-surface-raised: #191b23;
+  --color-border: #262832;
+  --color-border-soft: #1c1e27;
+
+  --color-ink: #f2f2f5;
+  --color-ink-muted: #9a9ca8;
+  --color-ink-faint: #62636e;
+
+  --color-accent: #8b6bff;
+  --color-accent-soft: #8b6bff1a;
+  --color-accent-strong: #a78bfa;
+
+  /* Block category colors — trigger / condition / action must read apart at a glance. */
+  --color-trigger: #38bdf8;
+  --color-trigger-soft: #38bdf81a;
+  --color-condition: #fbbf24;
+  --color-condition-soft: #fbbf241a;
+  --color-action: #c084fc;
+  --color-action-soft: #c084fc1a;
+
+  --animate-fade-in: fade-in 0.35s ease-out both;
+  --animate-rise-in: rise-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    background-image: radial-gradient(circle at 12% 0%, color-mix(in oklab, var(--color-accent) 14%, transparent), transparent 45%),
+      radial-gradient(circle at 88% 15%, color-mix(in oklab, var(--color-trigger) 10%, transparent), transparent 40%);
+    background-attachment: fixed;
+  }
+}

@@ -1,0 +1,27 @@
+# Foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/lib/
+
+# Env files (never commit real secrets)
+.env
+contracts/.env
+web/.env
+web/.env.local
+
+# Node / web
+web/node_modules/
+web/dist/
+web/dist-ssr/
+web/*.local
+web/coverage/
+
+# Private docs
+docs/canalis-spec.md
+
+# OS / editor
+**/.DS_Store
+*.swp
+.vscode/
+.idea/

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 64" width="210" height="64" role="img" aria-label="Canalis">
+  <title>Canalis</title>
+  <!-- mark -->
+  <g fill="none" stroke="#7C5CFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 32 H30"/>
+    <path d="M30 32 C39 32 42 15 50 15"/>
+    <path d="M30 32 H50"/>
+    <path d="M30 32 C39 32 42 49 50 49"/>
+  </g>
+  <circle cx="14" cy="32" r="3.4" fill="#7C5CFF"/>
+  <circle cx="30" cy="32" r="3.4" fill="#7C5CFF"/>
+  <circle cx="50" cy="15" r="4" fill="#A78BFA"/>
+  <circle cx="50" cy="32" r="4" fill="#A78BFA"/>
+  <circle cx="50" cy="49" r="4" fill="#A78BFA"/>
+  <!-- wordmark: fill for dark backgrounds -->
+  <text x="74" y="42" font-family="Inter, 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif" font-size="30" font-weight="600" letter-spacing="-0.6" fill="#EDEFF6">Canalis</text>
+</svg>
