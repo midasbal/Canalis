@@ -48,10 +48,10 @@ library FlowTypes {
     /// unused fields are ignored by the handler for that type.
     struct Action {
         ActionType kind;
-        address[] recipients; // Split/Forward/Sweep: destination(s)
-        uint256[] amountsOrBps; // Split: basis points or fixed amounts per recipient
-        uint256 fixedAmount; // Forward: flat amount to send
-        uint256 sweepThreshold; // Sweep: leave this much behind, sweep the rest
+        address[] recipients; // Split: N destinations; Forward/Sweep: recipients[0] is the one destination
+        uint256[] amountsOrBps; // Split: per-recipient basis points (0-10000 each, sum <= 10000) of `fixedAmount`
+        uint256 fixedAmount; // Forward: flat amount to send; Split: total amount being distributed
+        uint256 sweepThreshold; // Sweep: leave this much behind, sweep the rest to recipients[0]
         uint256 unlockTime; // LockRelease: unix timestamp funds become releasable
     }
 

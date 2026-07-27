@@ -12,12 +12,13 @@ import {CanalisAccount} from "./CanalisAccount.sol";
 /// data and interpreted on execution. This keeps the system to one audited
 /// contract, gas-efficient, and easy to extend with new action types.
 ///
-/// STATUS: first vertical slice. `flow.owner` is the CanalisAccount the flow
-/// is registered against (see FlowTypes.Flow); the human authorized to
+/// STATUS: slice 2. `flow.owner` is the CanalisAccount the flow is
+/// registered against (see FlowTypes.Flow); the human authorized to
 /// register/manually run a flow is that account's `owner()` (Ownable).
-/// Only TriggerType.Manual and ActionType.Forward are implemented — every
-/// other trigger/action explicitly reverts. See docs/canalis-spec.md
-/// section 7 for the full build checklist.
+/// Only TriggerType.Manual is implemented as a trigger; ActionType.Forward,
+/// .Split, and .Sweep are implemented as actions. OnReceive/OnSchedule/
+/// OnThreshold triggers, LockRelease, and all conditions still explicitly
+/// revert. See docs/canalis-spec.md section 7 for the full build checklist.
 contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// @dev flowId => Flow definition.
     mapping(uint256 => FlowTypes.Flow) private _flows;
@@ -137,11 +138,33 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         emit ActionExecuted(flowId, actionIndex, action.kind);
     }
 
-    /// TODO: pull USDC from `account` and distribute it across
-    /// action.recipients by action.amountsOrBps (basis points or fixed
-    /// amounts). Not implemented in this slice.
-    function _handleSplit(address, /* account */ FlowTypes.Action storage /* action */ ) internal pure {
-        revert("CanalisExecutor: Split not yet implemented");
+    /// @dev Distributes `action.fixedAmount` (the total) across
+    /// `action.recipients` by `action.amountsOrBps` (basis points, 0-10000
+    /// each, summing to at most 10000). `recipients[i]` gets
+    /// `fixedAmount * amountsOrBps[i] / 10000`; integer-division remainder
+    /// and any unallocated basis points simply stay in `account` — this is
+    /// not a bug, there is nowhere else for a fractional/unassigned share
+    /// to go. Recipients with a 0 bps share are skipped rather than making
+    /// a zero-amount `executorTransfer` call (which would revert).
+    function _handleSplit(address account, FlowTypes.Action storage action) internal {
+        uint256 n = action.recipients.length;
+        require(n >= 1, "CanalisExecutor: Split requires at least one recipient");
+        require(n == action.amountsOrBps.length, "CanalisExecutor: Split recipients/bps length mismatch");
+        require(action.fixedAmount > 0, "CanalisExecutor: Split total must be positive");
+
+        uint256 totalBps = 0;
+        for (uint256 i = 0; i < n; i++) {
+            require(action.recipients[i] != address(0), "CanalisExecutor: Split recipient cannot be zero address");
+            totalBps += action.amountsOrBps[i];
+        }
+        require(totalBps <= 10_000, "CanalisExecutor: Split basis points exceed 100%");
+
+        for (uint256 i = 0; i < n; i++) {
+            uint256 share = (action.fixedAmount * action.amountsOrBps[i]) / 10_000;
+            if (share > 0) {
+                CanalisAccount(account).executorTransfer(action.recipients[i], share);
+            }
+        }
     }
 
     /// @dev Moves `action.fixedAmount` USDC from `account` to
@@ -155,10 +178,24 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         CanalisAccount(account).executorTransfer(action.recipients[0], action.fixedAmount);
     }
 
-    /// TODO: move balance above action.sweepThreshold from `account` to
-    /// action.recipients[0]. Not implemented in this slice.
-    function _handleSweep(address, /* account */ FlowTypes.Action storage /* action */ ) internal pure {
-        revert("CanalisExecutor: Sweep not yet implemented");
+    /// @dev Moves whatever `account` holds above `action.sweepThreshold` to
+    /// `action.recipients[0]`. If the current balance is at or below the
+    /// threshold there is nothing to sweep — this is an honest no-op (no
+    /// `executorTransfer` call, no fake movement); `ActionExecuted` still
+    /// fires from `_dispatchAction` either way, since reaching that point
+    /// without reverting is itself meaningful (the sweep ran, it just had
+    /// nothing to do).
+    function _handleSweep(address account, FlowTypes.Action storage action) internal {
+        require(action.recipients.length >= 1, "CanalisExecutor: Sweep requires a destination");
+        address destination = action.recipients[0];
+        require(destination != address(0), "CanalisExecutor: Sweep destination cannot be zero address");
+
+        uint256 currentBalance = CanalisAccount(account).balance();
+        uint256 threshold = action.sweepThreshold;
+
+        if (currentBalance > threshold) {
+            CanalisAccount(account).executorTransfer(destination, currentBalance - threshold);
+        }
     }
 
     /// TODO: lock funds until action.unlockTime, then release from
