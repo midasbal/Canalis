@@ -20,6 +20,11 @@ contract CanalisAccount is Ownable {
     IERC20 public immutable usdc;
     address public executor;
 
+    /// @notice Increments on every successful `deposit()`. This is the
+    /// on-chain signal CanalisExecutor's OnReceive trigger checks against —
+    /// see CanalisExecutor for the full mechanism.
+    uint256 public depositNonce;
+
     event Deposited(address indexed from, uint256 amount);
     event Withdrawn(address indexed to, uint256 amount);
     event ExecutorTransferred(address indexed to, uint256 amount);
@@ -44,6 +49,7 @@ contract CanalisAccount is Ownable {
     function deposit(uint256 amount) external {
         require(amount > 0, "CanalisAccount: zero amount");
         usdc.safeTransferFrom(msg.sender, address(this), amount);
+        depositNonce++;
         emit Deposited(msg.sender, amount);
     }
 

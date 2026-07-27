@@ -19,6 +19,9 @@ web/dist-ssr/
 web/*.local
 web/coverage/
 
+# Node / keeper
+keeper/node_modules/
+
 # Private docs
 docs/canalis-spec.md
 CLAUDE.md

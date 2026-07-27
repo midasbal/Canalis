@@ -196,18 +196,28 @@ contract CanalisExecutorTest is Test {
     // executeFlow — trigger validation
     // ---------------------------------------------------------------------
 
-    /// @dev Every trigger type besides Manual must stay an explicit,
-    /// honest revert in this slice.
-    function test_ExecuteFlow_RevertsForUnimplementedTriggerType() public {
+    /// @dev OnSchedule is now a real, implemented trigger (slice 4) rather
+    /// than the explicit "not yet implemented" revert of earlier slices.
+    /// Full OnSchedule/OnThreshold/OnReceive coverage lives in
+    /// test/CanalisExecutorTriggers.t.sol; this is just a regression check
+    /// that a non-Manual trigger no longer hits the old blanket revert.
+    function test_ExecuteFlow_OnScheduleTrigger_IsNoLongerUnimplemented() public {
         FlowTypes.Flow memory flow = _manualForwardFlow(1_000_000);
         flow.trigger.kind = FlowTypes.TriggerType.OnSchedule;
+        flow.trigger.scheduleAt = 0; // due immediately
+
+        _fund(1_000_000);
 
         vm.prank(alice);
         uint256 flowId = executor.registerFlow(flow);
 
-        vm.prank(alice);
-        vm.expectRevert("CanalisExecutor: trigger validation not yet implemented");
+        // Caller-agnostic: a non-owner keeper address can fire it, and it
+        // actually moves funds now instead of reverting as "unimplemented".
+        address keeper = address(0xCAFE);
+        vm.prank(keeper);
         executor.executeFlow(flowId);
+
+        assertEq(usdc.balanceOf(recipient), 1_000_000, "OnSchedule flow should have executed for real");
     }
 
     /// @dev Manual trigger is owner-only: a non-owner caller must be

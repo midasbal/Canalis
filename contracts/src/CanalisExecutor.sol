@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {FlowTypes} from "./libraries/FlowTypes.sol";
 import {ICanalisExecutor} from "./interfaces/ICanalisExecutor.sol";
 import {CanalisAccount} from "./CanalisAccount.sol";
@@ -13,20 +15,51 @@ import {CanalisAccount} from "./CanalisAccount.sol";
 /// data and interpreted on execution. This keeps the system to one audited
 /// contract, gas-efficient, and easy to extend with new action types.
 ///
-/// STATUS: slice 3. `flow.owner` is the CanalisAccount the flow is
+/// STATUS: slice 4. `flow.owner` is the CanalisAccount the flow is
 /// registered against (see FlowTypes.Flow); the human authorized to
 /// register/manually run a flow is that account's `owner()` (Ownable).
-/// Only TriggerType.Manual is implemented as a trigger; ActionType.Forward,
-/// .Split, and .Sweep are implemented as actions; all Condition guard
-/// fields (balance floor, time window, cooldown, allow/deny recipients,
-/// amount cap) are implemented and enforced as a logical AND across every
-/// Condition entry on a flow. OnReceive/OnSchedule/OnThreshold triggers and
-/// LockRelease still explicitly revert. See docs/canalis-spec.md section 7
-/// for the full build checklist.
+/// All four triggers (Manual, OnSchedule, OnThreshold, OnReceive) and all
+/// four actions (Forward, Split, Sweep, LockRelease) are implemented; all
+/// Condition guard fields (balance floor, time window, cooldown, allow/deny
+/// recipients, amount cap) are implemented and enforced as a logical AND
+/// across every Condition entry on a flow. See docs/canalis-spec.md
+/// section 7 for the full build checklist.
+///
+/// AUTH & FAILURE MODEL for non-Manual triggers (slice 4 design decision):
+/// Manual stays owner-only (`msg.sender == account.owner()`). OnSchedule,
+/// OnThreshold, and OnReceive are caller-agnostic — ANY address (in
+/// practice, an off-chain keeper) may call `executeFlow` for these — because
+/// the trust boundary is the on-chain precondition re-check performed here,
+/// not who calls it. If that precondition doesn't hold (schedule not due,
+/// threshold not met, no new deposit to consume), `executeFlow` REVERTS
+/// with a specific reason rather than silently no-op'ing, so a keeper can
+/// call it speculatively, eat a cheap revert, and move on — it never looks
+/// like a flow "ran" when it didn't. Conditions (the Condition[] guard list)
+/// are evaluated identically regardless of trigger type, always AFTER the
+/// trigger check passes.
 contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    /// @dev Tracks a LockRelease action's escrow lifecycle. Funds are held
+    /// by THIS contract (the executor), not the CanalisAccount, between
+    /// lock and release — see `_handleLockRelease` for why.
+    enum LockState {
+        None,
+        Locked,
+        Released
+    }
+
     /// @dev flowId => Flow definition.
     mapping(uint256 => FlowTypes.Flow) private _flows;
     uint256 private _nextFlowId;
+
+    /// @dev flowId => the account's `depositNonce` value already consumed
+    /// by an OnReceive execution of that flow. See `_validateTrigger`.
+    mapping(uint256 => uint256) private _lastConsumedDepositNonce;
+
+    /// @dev (flowId, actionIndex) => LockRelease escrow state for that
+    /// specific action slot. See `_handleLockRelease`.
+    mapping(uint256 => mapping(uint256 => LockState)) private _lockState;
 
     modifier flowExists(uint256 flowId) {
         require(_flows[flowId].owner != address(0), "CanalisExecutor: unknown flow");
@@ -37,6 +70,13 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     function registerFlow(FlowTypes.Flow calldata flow) external returns (uint256 flowId) {
         require(flow.owner != address(0), "CanalisExecutor: owner required");
         require(msg.sender == CanalisAccount(flow.owner).owner(), "CanalisExecutor: caller is not flow owner");
+        if (flow.trigger.kind == FlowTypes.TriggerType.OnThreshold) {
+            // Slice 4 scope: only the "fires at/above threshold" direction
+            // is implemented (see class docs / spec section 7). Fail fast
+            // at registration rather than letting a "below" flow sit
+            // forever unable to fire.
+            require(flow.trigger.thresholdIsAbove, "CanalisExecutor: only at/above threshold supported");
+        }
 
         flowId = _nextFlowId++;
         FlowTypes.Flow storage stored = _flows[flowId];
@@ -53,6 +93,14 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             stored.actions.push(flow.actions[i]);
         }
 
+        if (flow.trigger.kind == FlowTypes.TriggerType.OnReceive) {
+            // Snapshot the account's current depositNonce as this flow's
+            // baseline, so deposits that already happened before this flow
+            // existed don't count as a "new" one — only deposits strictly
+            // after registration make an OnReceive flow eligible.
+            _lastConsumedDepositNonce[flowId] = CanalisAccount(flow.owner).depositNonce();
+        }
+
         emit FlowRegistered(flowId, flow.owner);
     }
 
@@ -61,13 +109,14 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         FlowTypes.Flow storage flow = _flows[flowId];
         require(flow.active, "CanalisExecutor: flow inactive");
 
-        _validateTrigger(flow);
-        _evaluateConditions(flow);
+        _validateTrigger(flowId, flow);
+        _evaluateConditions(flowId, flow);
 
         for (uint256 i = 0; i < flow.actions.length; i++) {
             _dispatchAction(flowId, i, flow.owner, flow.actions[i]);
         }
 
+        _advanceTrigger(flowId, flow);
         flow.lastExecutedAt = block.timestamp;
         emit FlowExecuted(flowId, msg.sender, block.timestamp);
     }
@@ -81,24 +130,79 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     // Internal: trigger validation
     // ---------------------------------------------------------------------
 
-    /// @dev Confirms the flow's trigger currently permits execution.
-    /// Manual is implemented: only the CanalisAccount owner (the human
-    /// wallet, via Ownable) may fire it. Every other trigger type still
-    /// explicitly reverts rather than silently passing — see the TODOs
-    /// below for their intended (future) authorization model.
-    function _validateTrigger(FlowTypes.Flow storage flow) internal view {
-        if (flow.trigger.kind == FlowTypes.TriggerType.Manual) {
+    /// @dev Confirms the flow's trigger currently permits execution. See
+    /// the class-level AUTH & FAILURE MODEL docs: Manual is caller-gated
+    /// (owner only); OnSchedule/OnThreshold/OnReceive are caller-agnostic
+    /// and instead re-verify their on-chain precondition, reverting with a
+    /// specific reason when it doesn't hold rather than silently no-op'ing.
+    function _validateTrigger(uint256 flowId, FlowTypes.Flow storage flow) internal view {
+        FlowTypes.TriggerType kind = flow.trigger.kind;
+
+        if (kind == FlowTypes.TriggerType.Manual) {
             require(msg.sender == CanalisAccount(flow.owner).owner(), "CanalisExecutor: caller is not flow owner");
             return;
         }
 
-        // TODO: OnReceive — event-driven from CanalisAccount on inbound
-        // transfer; not caller-gated the way Manual is.
-        // TODO: OnSchedule / OnThreshold — caller-agnostic (a keeper may
-        // call executeFlow on anyone's behalf), but re-verify the schedule
-        // time / balance threshold on-chain right here before proceeding,
-        // so an untrusted keeper can never fire the flow falsely.
-        revert("CanalisExecutor: trigger validation not yet implemented");
+        if (kind == FlowTypes.TriggerType.OnSchedule) {
+            // `trigger.scheduleAt` doubles as "next run at" — see
+            // `_advanceTrigger`, which mutates it forward on every
+            // successful execution.
+            require(block.timestamp >= flow.trigger.scheduleAt, "CanalisExecutor: schedule not due");
+            return;
+        }
+
+        if (kind == FlowTypes.TriggerType.OnThreshold) {
+            // Direction is validated once at registration (only "at/above"
+            // is supported this slice); re-check the live balance here.
+            require(
+                CanalisAccount(flow.owner).balance() >= flow.trigger.thresholdAmount,
+                "CanalisExecutor: threshold not met"
+            );
+            return;
+        }
+
+        if (kind == FlowTypes.TriggerType.OnReceive) {
+            // Deposits routed through CanalisAccount.deposit() bump
+            // depositNonce; a flow is eligible exactly once per deposit
+            // that arrived since this flow last consumed one. See
+            // `_advanceTrigger` for the consuming side.
+            uint256 depositNonce = CanalisAccount(flow.owner).depositNonce();
+            require(depositNonce > _lastConsumedDepositNonce[flowId], "CanalisExecutor: no new deposit to consume");
+            return;
+        }
+
+        revert("CanalisExecutor: unknown trigger type");
+    }
+
+    /// @dev Advances trigger-specific state after a successful execution
+    /// (actions already ran atomically by the time this is called). Manual
+    /// and OnThreshold need nothing here — they re-derive their check from
+    /// live state every call.
+    function _advanceTrigger(uint256 flowId, FlowTypes.Flow storage flow) internal {
+        FlowTypes.TriggerType kind = flow.trigger.kind;
+
+        if (kind == FlowTypes.TriggerType.OnSchedule) {
+            uint256 interval = flow.trigger.scheduleInterval;
+            if (interval == 0) {
+                // One-shot: never due again. A sentinel far beyond any real
+                // timestamp, rather than a magic "inactive" flag reused
+                // from elsewhere.
+                flow.trigger.scheduleAt = type(uint256).max;
+            } else {
+                // Catch-up without looping: jump directly to the next
+                // interval boundary strictly after "now", so a keeper that
+                // missed several periods fires once, not once per missed
+                // period.
+                uint256 scheduleAt = flow.trigger.scheduleAt;
+                uint256 elapsed = block.timestamp - scheduleAt;
+                flow.trigger.scheduleAt = scheduleAt + (elapsed / interval + 1) * interval;
+            }
+            return;
+        }
+
+        if (kind == FlowTypes.TriggerType.OnReceive) {
+            _lastConsumedDepositNonce[flowId] = CanalisAccount(flow.owner).depositNonce();
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -116,7 +220,7 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// keyed off `flow`/`condition` alone — this is a deliberate seam so a
     /// future keeper-driven "skip rather than revert" path can reuse the
     /// same per-field logic without restructuring it.
-    function _evaluateConditions(FlowTypes.Flow storage flow) internal view {
+    function _evaluateConditions(uint256 flowId, FlowTypes.Flow storage flow) internal view {
         for (uint256 i = 0; i < flow.conditions.length; i++) {
             FlowTypes.Condition storage condition = flow.conditions[i];
 
@@ -124,7 +228,7 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             _checkTimeWindow(condition);
             _checkCooldown(flow, condition);
             _checkRecipients(flow, condition);
-            _checkAmountCap(flow.owner, flow, condition);
+            _checkAmountCap(flowId, flow.owner, flow, condition);
         }
     }
 
@@ -211,15 +315,18 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// `action.fixedAmount` (Forward's flat send / Split's distribution
     /// total); Sweep = `max(0, live account balance - action.sweepThreshold)`
     /// at evaluation time, mirroring exactly what `_handleSweep` will move if
-    /// it runs; LockRelease contributes 0 (not implemented — its handler
-    /// reverts on dispatch regardless of this check).
-    function _checkAmountCap(address account, FlowTypes.Flow storage flow, FlowTypes.Condition storage condition)
-        internal
-        view
-    {
+    /// it runs; LockRelease = `action.fixedAmount` whenever this call would
+    /// still move money (locking in or releasing out), 0 once already
+    /// released (a further call reverts in the handler regardless).
+    function _checkAmountCap(
+        uint256 flowId,
+        address account,
+        FlowTypes.Flow storage flow,
+        FlowTypes.Condition storage condition
+    ) internal view {
         if (condition.minAmount == 0 && condition.maxAmount == 0) return;
 
-        uint256 total = _totalAmountMoved(account, flow);
+        uint256 total = _totalAmountMoved(flowId, account, flow);
         if (condition.minAmount > 0) {
             require(total >= condition.minAmount, "CanalisExecutor: amount below minimum");
         }
@@ -228,7 +335,11 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         }
     }
 
-    function _totalAmountMoved(address account, FlowTypes.Flow storage flow) internal view returns (uint256 total) {
+    function _totalAmountMoved(uint256 flowId, address account, FlowTypes.Flow storage flow)
+        internal
+        view
+        returns (uint256 total)
+    {
         for (uint256 i = 0; i < flow.actions.length; i++) {
             FlowTypes.Action storage action = flow.actions[i];
             if (action.kind == FlowTypes.ActionType.Forward || action.kind == FlowTypes.ActionType.Split) {
@@ -238,8 +349,11 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
                 if (currentBalance > action.sweepThreshold) {
                     total += currentBalance - action.sweepThreshold;
                 }
+            } else if (action.kind == FlowTypes.ActionType.LockRelease) {
+                if (_lockState[flowId][i] != LockState.Released) {
+                    total += action.fixedAmount;
+                }
             }
-            // ActionType.LockRelease: not yet implemented, contributes 0.
         }
     }
 
@@ -260,7 +374,7 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         } else if (action.kind == FlowTypes.ActionType.Sweep) {
             _handleSweep(account, action);
         } else if (action.kind == FlowTypes.ActionType.LockRelease) {
-            _handleLockRelease(account, action);
+            _handleLockRelease(flowId, actionIndex, account, action);
         } else {
             revert("CanalisExecutor: unknown action type");
         }
@@ -328,9 +442,53 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         }
     }
 
-    /// TODO: lock funds until action.unlockTime, then release from
-    /// `account` to recipients. Not implemented in this slice.
-    function _handleLockRelease(address, /* account */ FlowTypes.Action storage /* action */ ) internal pure {
-        revert("CanalisExecutor: LockRelease not yet implemented");
+    /// @dev Two-phase escrow keyed by (flowId, actionIndex):
+    ///
+    /// FUND TRACKING DECISION: locked funds are held by the EXECUTOR
+    /// contract itself, not the CanalisAccount. The lock phase moves
+    /// `action.fixedAmount` out of `account` via `executorTransfer` into
+    /// this contract's own USDC balance; the release phase pays it out
+    /// directly from here. Rationale: `CanalisAccount.balance()` is what
+    /// every other condition/action (balance floor, amount cap, Sweep) reads
+    /// as "spendable" — if locked funds stayed in the account under a
+    /// separate ledger, every one of those call sites would need to learn
+    /// to subtract them out, or risk a Sweep silently carrying away funds
+    /// that are supposed to be locked. Physically relocating them removes
+    /// that whole class of double-spend bug for free.
+    ///
+    /// - First call for a given (flowId, actionIndex) (state == None): locks
+    ///   — pulls `action.fixedAmount` from `account` into the executor and
+    ///   marks state Locked. Does not check `unlockTime` yet; the lock
+    ///   itself is unconditional once dispatched.
+    /// - A later call while Locked and `block.timestamp < action.unlockTime`:
+    ///   reverts "still locked" — no funds move.
+    /// - A later call while Locked and `block.timestamp >= action.unlockTime`:
+    ///   releases — pays `action.fixedAmount` to `action.recipients[0]` from
+    ///   the executor's own balance and marks state Released.
+    /// - Any call once Released: reverts "already released" — release can
+    ///   only ever happen once per (flowId, actionIndex), so double-release
+    ///   is structurally impossible, not just guarded against.
+    function _handleLockRelease(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
+        internal
+    {
+        require(action.recipients.length >= 1, "CanalisExecutor: LockRelease requires a recipient");
+        address recipient = action.recipients[0];
+        require(recipient != address(0), "CanalisExecutor: LockRelease recipient cannot be zero address");
+        require(action.fixedAmount > 0, "CanalisExecutor: LockRelease amount must be positive");
+        require(action.unlockTime > 0, "CanalisExecutor: LockRelease unlockTime required");
+
+        LockState state = _lockState[flowId][actionIndex];
+
+        if (state == LockState.None) {
+            _lockState[flowId][actionIndex] = LockState.Locked;
+            CanalisAccount(account).executorTransfer(address(this), action.fixedAmount);
+            return;
+        }
+
+        require(state != LockState.Released, "CanalisExecutor: already released");
+        require(block.timestamp >= action.unlockTime, "CanalisExecutor: still locked");
+
+        _lockState[flowId][actionIndex] = LockState.Released;
+        IERC20(CanalisAccount(account).usdc()).safeTransfer(recipient, action.fixedAmount);
     }
 }
