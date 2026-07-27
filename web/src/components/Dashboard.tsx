@@ -1,16 +1,30 @@
-import { useAccount } from "wagmi";
+import { useAccount, useReadContract } from "wagmi";
+import { formatUnits } from "viem";
 import { Card } from "./ui/Card";
 import { EmptyState } from "./ui/EmptyState";
-import { CoinIcon, FlowIcon, LogIcon } from "./ui/icons";
+import { FlowIcon, LogIcon } from "./ui/icons";
+import { useCanalisAccount } from "../lib/useCanalisAccount";
+import { canalisAccountAbi } from "../lib/abi";
+
+/** Arc testnet USDC's ERC-20 decimals — do not confuse with the 18-decimal native gas token. */
+const USDC_DECIMALS = 6;
 
 /**
- * Dashboard: connected account is live via wagmi. Balance, deployed flows,
- * and the run log are honest "not implemented yet" empty states until
- * CanalisAccount / CanalisExecutor reads are wired up — see
+ * Dashboard: connected account and USDC balance are live via wagmi.
+ * Deployed flows and the run log are still honest "not implemented yet"
+ * empty states until CanalisExecutor event indexing is wired up — see
  * docs/canalis-spec.md section 7.1 (MVP checklist).
  */
 export function Dashboard() {
   const { address, isConnected } = useAccount();
+  const { accountAddress, hasAccount, isLoading: accountLoading } = useCanalisAccount();
+
+  const { data: balance, isLoading: balanceLoading } = useReadContract({
+    address: accountAddress,
+    abi: canalisAccountAbi,
+    functionName: "balance",
+    query: { enabled: Boolean(accountAddress) },
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -27,18 +41,26 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <Card eyebrow="USDC" title="Balance">
-          <EmptyState
-            icon={<CoinIcon />}
-            title="No balance data yet"
-            detail="Reading the CanalisAccount USDC balance isn't wired up yet."
-          />
+          {!isConnected ? (
+            <p className="text-sm text-ink-muted">Connect a wallet to see your balance.</p>
+          ) : accountLoading ? (
+            <p className="text-sm text-ink-muted">Checking for your Canalis account…</p>
+          ) : !hasAccount ? (
+            <p className="text-sm text-ink-muted">No CanalisAccount yet — create one from the Builder tab.</p>
+          ) : balanceLoading ? (
+            <p className="text-sm text-ink-muted">Loading balance…</p>
+          ) : (
+            <p className="text-2xl font-semibold text-ink">
+              {formatUnits(balance ?? 0n, USDC_DECIMALS)} <span className="text-sm text-ink-muted">USDC</span>
+            </p>
+          )}
         </Card>
 
         <Card eyebrow="Flows" title="Deployed flows">
           <EmptyState
             icon={<FlowIcon />}
             title="No flows deployed yet"
-            detail="The Builder's deploy action isn't wired to the executor yet."
+            detail="Listing all deployed flows isn't wired up yet — the Builder tab can deploy and run one Forward flow."
           />
         </Card>
       </div>

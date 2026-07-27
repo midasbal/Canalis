@@ -11,7 +11,8 @@ interface ICanalisExecutor {
     event FlowExecuted(uint256 indexed flowId, address indexed triggeredBy, uint256 timestamp);
     event ActionExecuted(uint256 indexed flowId, uint256 indexed actionIndex, FlowTypes.ActionType kind);
 
-    /// @notice Register a new flow, owned by the caller's CanalisAccount.
+    /// @notice Register a new flow against `flow.owner` (a CanalisAccount).
+    /// Caller must be that account's owner.
     /// @return flowId The id assigned to the newly stored flow.
     function registerFlow(FlowTypes.Flow calldata flow) external returns (uint256 flowId);
 

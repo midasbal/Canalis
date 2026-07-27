@@ -2,6 +2,7 @@ import { Card } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { FlowBlock, type BlockCategory } from "./ui/FlowBlock";
 import { FlowConnector } from "./ui/FlowConnector";
+import { DeployForwardFlow } from "./DeployForwardFlow";
 
 const TRIGGER_BLOCKS = [
   { label: "On receive", description: "Fires when USDC lands in the account." },
@@ -116,13 +117,18 @@ export function BuilderCanvas() {
       <div className="flex items-center gap-3">
         <button
           disabled
-          title="TODO: encode the composed flow and call CanalisExecutor.registerFlow"
+          title="TODO: drag-and-drop composition for arbitrary trigger/condition/action graphs"
           className="cursor-not-allowed rounded-xl bg-accent/40 px-5 py-2.5 text-sm font-medium text-white/70"
         >
-          Deploy flow
+          Deploy from canvas
         </button>
-        <span className="text-xs text-ink-faint">Requires the drag-and-drop canvas and on-chain wiring above.</span>
+        <span className="text-xs text-ink-faint">
+          Full drag-and-drop composition isn't built yet — use "Deploy a Forward flow" below for a real, working
+          flow.
+        </span>
       </div>
+
+      <DeployForwardFlow />
     </div>
   );
 }

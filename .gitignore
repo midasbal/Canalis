@@ -6,6 +6,8 @@ contracts/lib/
 
 # Env files (never commit real secrets)
 .env
+.env.*
+!.env.example
 contracts/.env
 web/.env
 web/.env.local

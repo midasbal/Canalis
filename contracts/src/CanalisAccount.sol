@@ -6,11 +6,14 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title CanalisAccount
-/// @notice A minimal per-user vault that custodies USDC and points at the
-/// shared CanalisExecutor that is allowed to act on its behalf via the
-/// user's registered flows. Kept intentionally small for the MVP — see
-/// docs/canalis-spec.md section 4.2 for the eventual modular-smart-account
-/// direction (ERC-4337/7579 + session keys for the keeper).
+/// @notice A minimal per-user vault that custodies USDC. `executor` is a
+/// real trust boundary (see `onlyExecutor`/`executorTransfer`): the shared
+/// CanalisExecutor is the only address allowed to move funds out of this
+/// account on the owner's behalf while running the owner's registered
+/// flows. Normally created via CanalisAccountFactory, one per owner. Kept
+/// intentionally a plain vault for the MVP — see docs/canalis-spec.md
+/// section 4.2 for the eventual modular-smart-account direction
+/// (ERC-4337/7579 + session keys for the keeper).
 contract CanalisAccount is Ownable {
     using SafeERC20 for IERC20;
 
@@ -19,10 +22,19 @@ contract CanalisAccount is Ownable {
 
     event Deposited(address indexed from, uint256 amount);
     event Withdrawn(address indexed to, uint256 amount);
+    event ExecutorTransferred(address indexed to, uint256 amount);
     event ExecutorUpdated(address indexed previousExecutor, address indexed newExecutor);
+
+    /// @dev The real trust boundary flow execution relies on: only the
+    /// configured executor may move funds via `executorTransfer`.
+    modifier onlyExecutor() {
+        require(msg.sender == executor, "CanalisAccount: caller is not executor");
+        _;
+    }
 
     constructor(address owner_, address usdc_, address executor_) Ownable(owner_) {
         require(usdc_ != address(0), "CanalisAccount: usdc required");
+        require(executor_ != address(0), "CanalisAccount: executor required");
         usdc = IERC20(usdc_);
         executor = executor_;
     }
@@ -43,10 +55,20 @@ contract CanalisAccount is Ownable {
         emit Withdrawn(to, amount);
     }
 
+    /// @notice Executor-gated fund movement — the trust boundary flow
+    /// execution relies on to actually move USDC out of this account.
+    /// Only the configured `executor` can call this; the owner cannot call
+    /// it directly (they use `withdraw` instead), and no one else can.
+    function executorTransfer(address to, uint256 amount) external onlyExecutor {
+        require(to != address(0), "CanalisAccount: zero recipient");
+        require(amount > 0, "CanalisAccount: zero amount");
+        usdc.safeTransfer(to, amount);
+        emit ExecutorTransferred(to, amount);
+    }
+
     /// @notice Owner-only rotation of the executor this account trusts.
-    /// TODO: once the executor calls into this account to move funds during
-    /// flow execution, gate that call path to `executor` specifically.
     function setExecutor(address newExecutor) external onlyOwner {
+        require(newExecutor != address(0), "CanalisAccount: executor required");
         emit ExecutorUpdated(executor, newExecutor);
         executor = newExecutor;
     }

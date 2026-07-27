@@ -1,3 +1,4 @@
+import { decodeAbiParameters, encodeAbiParameters } from "viem";
 import type { Address, Hex } from "viem";
 
 /**
@@ -63,19 +64,71 @@ export interface Flow {
 }
 
 /**
- * Encode a Flow into the calldata shape CanalisExecutor.registerFlow expects.
- * TODO: implement with viem's `encodeAbiParameters` once the executor ABI is
- * finalized (the struct currently matches FlowTypes.Flow directly, so this
- * may end up being a pass-through for `registerFlow`'s tuple argument).
+ * viem ABI parameter descriptor mirroring `FlowTypes.Flow` field-for-field
+ * (names/order/types must match the Solidity struct exactly). Exported so
+ * lib/abi.ts's `registerFlow`/`getFlow` ABI entries share this single
+ * definition instead of duplicating the nested tuple.
  */
-export function encodeFlow(_flow: Flow): Hex {
-  throw new Error("TODO: encodeFlow not yet implemented");
-}
+export const flowAbiParameter = {
+  name: "flow",
+  type: "tuple",
+  components: [
+    { name: "owner", type: "address" },
+    {
+      name: "trigger",
+      type: "tuple",
+      components: [
+        { name: "kind", type: "uint8" },
+        { name: "scheduleAt", type: "uint256" },
+        { name: "scheduleInterval", type: "uint256" },
+        { name: "thresholdAmount", type: "uint256" },
+        { name: "thresholdIsAbove", type: "bool" },
+      ],
+    },
+    {
+      name: "conditions",
+      type: "tuple[]",
+      components: [
+        { name: "minAmount", type: "uint256" },
+        { name: "maxAmount", type: "uint256" },
+        { name: "cooldownSeconds", type: "uint256" },
+        { name: "windowStart", type: "uint256" },
+        { name: "windowEnd", type: "uint256" },
+        { name: "minBalance", type: "uint256" },
+        { name: "allowedRecipients", type: "address[]" },
+        { name: "deniedRecipients", type: "address[]" },
+      ],
+    },
+    {
+      name: "actions",
+      type: "tuple[]",
+      components: [
+        { name: "kind", type: "uint8" },
+        { name: "recipients", type: "address[]" },
+        { name: "amountsOrBps", type: "uint256[]" },
+        { name: "fixedAmount", type: "uint256" },
+        { name: "sweepThreshold", type: "uint256" },
+        { name: "unlockTime", type: "uint256" },
+      ],
+    },
+    { name: "active", type: "bool" },
+    { name: "lastExecutedAt", type: "uint256" },
+  ],
+} as const;
 
 /**
- * Decode a Flow previously read from CanalisExecutor.getFlow.
- * TODO: implement once the executor ABI is finalized.
+ * Encode a Flow into the ABI-encoded tuple bytes CanalisExecutor's
+ * `registerFlow`/`getFlow` operate on. Not required for calling
+ * `registerFlow` via wagmi (which encodes typed struct args itself), but
+ * useful standalone — e.g. the Builder's "encoded flow" preview, or future
+ * flow import/export.
  */
-export function decodeFlow(_data: Hex): Flow {
-  throw new Error("TODO: decodeFlow not yet implemented");
+export function encodeFlow(flow: Flow): Hex {
+  return encodeAbiParameters([flowAbiParameter], [flow]);
+}
+
+/** Decode a Flow previously encoded with `encodeFlow`. */
+export function decodeFlow(data: Hex): Flow {
+  const [decoded] = decodeAbiParameters([flowAbiParameter], data);
+  return decoded as Flow;
 }
