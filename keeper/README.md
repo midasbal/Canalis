@@ -24,11 +24,23 @@ gas-USDC to pay for its own transactions.
 
 ## Flow discovery
 
-`CanalisExecutor` has no on-chain "list all flows for owner X" function, so
-the keeper indexes `FlowRegistered` events directly from the executor
-contract (across every owner, not just one) to build its working set of
-flow IDs, then re-reads each flow's current state via `getFlow` on every
-poll.
+`CanalisExecutor` has no on-chain "list every flow across every owner"
+function, so this keeper services **one configured account**
+(`CANALIS_ACCOUNT`) and discovers its flows via `flowsOf(CANALIS_ACCOUNT)` —
+a single `eth_call`, not a log scan. On every poll, each returned flow ID
+goes through `previewFlow(id)`; if `canRun` is `true`, the keeper sends
+`executeFlow(id)`.
+
+This is deliberately **not** event-log-based (an earlier version indexed
+`FlowRegistered` via `eth_getLogs`). Free-tier RPCs cap `getLogs` far too
+tight to scan reliably in practice (QuickNode as low as 5 blocks, Alchemy
+10) — `flowsOf`/`previewFlow`/`executeFlow` are all plain `eth_call`s, so
+this keeper is completely immune to that cap.
+
+The tradeoff: servicing multiple accounts would mean either a second
+on-chain enumeration mechanism (e.g. an `allAccounts()` view on the
+factory) or a config list of accounts to poll — fine for the single-user
+demo as-is; multi-account support is future work, not implemented here.
 
 ## Running it
 
@@ -36,7 +48,7 @@ poll.
 cd keeper
 npm install
 cp .env.example .env
-# edit .env: RPC_URL, EXECUTOR_ADDRESS, KEEPER_PRIVATE_KEY, POLL_INTERVAL_MS
+# edit .env: RPC_URL, EXECUTOR_ADDRESS, CANALIS_ACCOUNT, KEEPER_PRIVATE_KEY, POLL_INTERVAL_MS
 npm start
 ```
 
@@ -58,3 +70,5 @@ linking straight to `testnet.arcscan.app`.
 - It never touches Manual-trigger flows.
 - It does not retry failed sends beyond the next poll cycle; a transient RPC
   error is logged and the loop continues at the next interval.
+- It does not enumerate flows across multiple CanalisAccounts — see "Flow
+  discovery" above.

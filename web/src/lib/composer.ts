@@ -1,0 +1,393 @@
+import { isAddress, parseUnits } from "viem";
+import type { Address } from "viem";
+import { ActionType, TriggerType, type Action, type Condition, type Flow } from "./flows";
+import { USDC_DECIMALS, datetimeLocalToUnixSeconds } from "./format";
+
+/**
+ * Draft (string-based, form-friendly) state for the flow composer, and its
+ * conversion into a real `Flow` (lib/flows.ts) for `registerFlow` / the
+ * pre-deploy summary. Kept separate from `flows.ts` (a pure Solidity
+ * mirror) since this is UI-only shape — free-text inputs, per-row ids for
+ * add/remove lists, datetime-local strings — that never touches the chain
+ * directly.
+ */
+
+let nextId = 0;
+function freshId(): string {
+  nextId += 1;
+  return `row-${nextId}`;
+}
+
+// ---------------------------------------------------------------------
+// Trigger
+// ---------------------------------------------------------------------
+
+export interface ComposerTrigger {
+  kind: TriggerType;
+  scheduleMode: "now" | "custom";
+  scheduleAt: string; // datetime-local value, used when scheduleMode === "custom"
+  intervalSeconds: string; // "" or "0" = one-shot
+  thresholdAmount: string; // USDC
+}
+
+export function defaultTrigger(): ComposerTrigger {
+  return { kind: TriggerType.Manual, scheduleMode: "now", scheduleAt: "", intervalSeconds: "", thresholdAmount: "" };
+}
+
+/** The composer's full working state — trigger + conditions + actions. */
+export interface ComposerDraft {
+  trigger: ComposerTrigger;
+  conditions: ComposerCondition[];
+  actions: ComposerAction[];
+}
+
+export function defaultDraft(): ComposerDraft {
+  return { trigger: defaultTrigger(), conditions: [], actions: [] };
+}
+
+// ---------------------------------------------------------------------
+// Conditions
+// ---------------------------------------------------------------------
+
+export type ConditionKind = "amountCap" | "minBalance" | "cooldown" | "timeWindow" | "allowList" | "denyList";
+
+export const CONDITION_KIND_LABELS: Record<ConditionKind, string> = {
+  amountCap: "Amount cap",
+  minBalance: "Minimum balance",
+  cooldown: "Cooldown",
+  timeWindow: "Time window",
+  allowList: "Allow-list recipients",
+  denyList: "Deny-list recipients",
+};
+
+export interface AddressRow {
+  id: string;
+  address: string;
+}
+
+export interface ComposerCondition {
+  id: string;
+  kind: ConditionKind;
+  minAmount: string;
+  maxAmount: string;
+  minBalance: string;
+  cooldownSeconds: string;
+  windowStart: string; // datetime-local
+  windowEnd: string; // datetime-local
+  recipients: AddressRow[]; // allowList / denyList
+}
+
+export function emptyCondition(kind: ConditionKind): ComposerCondition {
+  return {
+    id: freshId(),
+    kind,
+    minAmount: "",
+    maxAmount: "",
+    minBalance: "",
+    cooldownSeconds: "",
+    windowStart: "",
+    windowEnd: "",
+    recipients: [],
+  };
+}
+
+export function newAddressRow(): AddressRow {
+  return { id: freshId(), address: "" };
+}
+
+// ---------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------
+
+export const ACTION_KIND_LABELS: Record<ActionType, string> = {
+  [ActionType.Forward]: "Forward",
+  [ActionType.Split]: "Split",
+  [ActionType.Sweep]: "Sweep",
+  [ActionType.LockRelease]: "Lock / release",
+};
+
+export interface SplitRecipientRow {
+  id: string;
+  address: string;
+  bps: string; // basis points, 0-10000
+}
+
+export interface ComposerAction {
+  id: string;
+  kind: ActionType;
+  // Forward
+  forwardRecipient: string;
+  forwardAmount: string;
+  // Split
+  splitTotal: string;
+  splitRecipients: SplitRecipientRow[];
+  // Sweep
+  sweepDestination: string;
+  sweepThreshold: string;
+  // LockRelease
+  lockRecipient: string;
+  lockAmount: string;
+  lockReleaseAt: string; // datetime-local
+}
+
+export function emptyAction(kind: ActionType): ComposerAction {
+  return {
+    id: freshId(),
+    kind,
+    forwardRecipient: "",
+    forwardAmount: "",
+    splitTotal: "",
+    splitRecipients: [],
+    sweepDestination: "",
+    sweepThreshold: "",
+    lockRecipient: "",
+    lockAmount: "",
+    lockReleaseAt: "",
+  };
+}
+
+export function newSplitRecipientRow(): SplitRecipientRow {
+  return { id: freshId(), address: "", bps: "" };
+}
+
+// ---------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------
+
+function parseUsdcSafe(value: string): bigint | null {
+  if (!value.trim()) return null;
+  try {
+    const parsed = parseUnits(value.trim(), USDC_DECIMALS);
+    return parsed >= 0n ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseIntSafe(value: string): bigint | null {
+  if (!value.trim()) return null;
+  if (!/^\d+$/.test(value.trim())) return null;
+  return BigInt(value.trim());
+}
+
+// ---------------------------------------------------------------------
+// Draft -> Flow (tolerant: invalid/missing fields fall back to sentinel
+// zero values so a partially-filled draft can still be summarized/previewed
+// without throwing. `validateComposerDraft` is what actually gates deploy.)
+// ---------------------------------------------------------------------
+
+export function draftToFlow(
+  owner: Address,
+  trigger: ComposerTrigger,
+  conditions: ComposerCondition[],
+  actions: ComposerAction[],
+): Flow {
+  return {
+    owner,
+    trigger: {
+      kind: trigger.kind,
+      scheduleAt: triggerScheduleAt(trigger),
+      scheduleInterval: parseIntSafe(trigger.intervalSeconds) ?? 0n,
+      thresholdAmount: parseUsdcSafe(trigger.thresholdAmount) ?? 0n,
+      // Engine (slice 4) only supports the "fires at/above" direction —
+      // registerFlow reverts otherwise. Always true; there is no UI toggle
+      // because the other direction doesn't exist on-chain.
+      thresholdIsAbove: true,
+    },
+    conditions: conditions.map(conditionToStruct),
+    actions: actions.map(actionToStruct),
+    active: true,
+    lastExecutedAt: 0n,
+  };
+}
+
+function triggerScheduleAt(trigger: ComposerTrigger): bigint {
+  if (trigger.kind !== TriggerType.OnSchedule) return 0n;
+  if (trigger.scheduleMode === "now") return BigInt(Math.floor(Date.now() / 1000));
+  return datetimeLocalToUnixSeconds(trigger.scheduleAt) ?? 0n;
+}
+
+function conditionToStruct(condition: ComposerCondition): Condition {
+  const base: Condition = {
+    minAmount: 0n,
+    maxAmount: 0n,
+    cooldownSeconds: 0n,
+    windowStart: 0n,
+    windowEnd: 0n,
+    minBalance: 0n,
+    allowedRecipients: [],
+    deniedRecipients: [],
+  };
+
+  switch (condition.kind) {
+    case "amountCap":
+      return { ...base, minAmount: parseUsdcSafe(condition.minAmount) ?? 0n, maxAmount: parseUsdcSafe(condition.maxAmount) ?? 0n };
+    case "minBalance":
+      return { ...base, minBalance: parseUsdcSafe(condition.minBalance) ?? 0n };
+    case "cooldown":
+      return { ...base, cooldownSeconds: parseIntSafe(condition.cooldownSeconds) ?? 0n };
+    case "timeWindow":
+      return {
+        ...base,
+        windowStart: datetimeLocalToUnixSeconds(condition.windowStart) ?? 0n,
+        windowEnd: datetimeLocalToUnixSeconds(condition.windowEnd) ?? 0n,
+      };
+    case "allowList":
+      return { ...base, allowedRecipients: validAddresses(condition.recipients) };
+    case "denyList":
+      return { ...base, deniedRecipients: validAddresses(condition.recipients) };
+    default:
+      return base;
+  }
+}
+
+function validAddresses(rows: AddressRow[]): Address[] {
+  return rows.map((r) => r.address.trim()).filter((a): a is Address => isAddress(a));
+}
+
+function actionToStruct(action: ComposerAction): Action {
+  const base: Action = {
+    kind: action.kind,
+    recipients: [],
+    amountsOrBps: [],
+    fixedAmount: 0n,
+    sweepThreshold: 0n,
+    unlockTime: 0n,
+  };
+
+  switch (action.kind) {
+    case ActionType.Forward:
+      return {
+        ...base,
+        recipients: isAddress(action.forwardRecipient.trim()) ? [action.forwardRecipient.trim() as Address] : [],
+        fixedAmount: parseUsdcSafe(action.forwardAmount) ?? 0n,
+      };
+    case ActionType.Split:
+      return {
+        ...base,
+        recipients: action.splitRecipients.map((r) => r.address.trim()) as Address[],
+        amountsOrBps: action.splitRecipients.map((r) => parseIntSafe(r.bps) ?? 0n),
+        fixedAmount: parseUsdcSafe(action.splitTotal) ?? 0n,
+      };
+    case ActionType.Sweep:
+      return {
+        ...base,
+        recipients: isAddress(action.sweepDestination.trim()) ? [action.sweepDestination.trim() as Address] : [],
+        sweepThreshold: parseUsdcSafe(action.sweepThreshold) ?? 0n,
+      };
+    case ActionType.LockRelease:
+      return {
+        ...base,
+        recipients: isAddress(action.lockRecipient.trim()) ? [action.lockRecipient.trim() as Address] : [],
+        fixedAmount: parseUsdcSafe(action.lockAmount) ?? 0n,
+        unlockTime: datetimeLocalToUnixSeconds(action.lockReleaseAt) ?? 0n,
+      };
+    default:
+      return base;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Validation — gates the Deploy button and lists what to fix.
+// ---------------------------------------------------------------------
+
+export function validateComposerDraft(
+  trigger: ComposerTrigger,
+  conditions: ComposerCondition[],
+  actions: ComposerAction[],
+): string[] {
+  const errors: string[] = [];
+
+  // Trigger
+  if (trigger.kind === TriggerType.OnSchedule) {
+    if (trigger.scheduleMode === "custom" && datetimeLocalToUnixSeconds(trigger.scheduleAt) === null) {
+      errors.push("Schedule: pick a first-run date/time, or switch to \"now\".");
+    }
+    if (trigger.intervalSeconds.trim() && parseIntSafe(trigger.intervalSeconds) === null) {
+      errors.push("Schedule: interval must be a whole number of seconds (0 or blank for one-time).");
+    }
+  }
+  if (trigger.kind === TriggerType.OnThreshold) {
+    const amount = parseUsdcSafe(trigger.thresholdAmount);
+    if (amount === null || amount <= 0n) {
+      errors.push("Threshold: amount must be a valid USDC amount greater than 0.");
+    }
+  }
+
+  // Conditions
+  for (const c of conditions) {
+    const label = CONDITION_KIND_LABELS[c.kind];
+    if (c.kind === "amountCap") {
+      const min = c.minAmount.trim() ? parseUsdcSafe(c.minAmount) : 0n;
+      const max = c.maxAmount.trim() ? parseUsdcSafe(c.maxAmount) : 0n;
+      if (min === null) errors.push(`${label}: minimum amount is invalid.`);
+      if (max === null) errors.push(`${label}: maximum amount is invalid.`);
+      if (!c.minAmount.trim() && !c.maxAmount.trim()) errors.push(`${label}: set a minimum, a maximum, or both.`);
+      if (min !== null && max !== null && min > 0n && max > 0n && min > max) {
+        errors.push(`${label}: minimum can't be greater than maximum.`);
+      }
+    }
+    if (c.kind === "minBalance") {
+      const min = parseUsdcSafe(c.minBalance);
+      if (min === null || min <= 0n) errors.push(`${label}: enter a valid USDC amount greater than 0.`);
+    }
+    if (c.kind === "cooldown") {
+      const seconds = parseIntSafe(c.cooldownSeconds);
+      if (seconds === null || seconds <= 0n) errors.push(`${label}: enter a whole number of seconds greater than 0.`);
+    }
+    if (c.kind === "timeWindow") {
+      const start = c.windowStart ? datetimeLocalToUnixSeconds(c.windowStart) : null;
+      const end = c.windowEnd ? datetimeLocalToUnixSeconds(c.windowEnd) : null;
+      if (!c.windowStart && !c.windowEnd) errors.push(`${label}: set a start, an end, or both.`);
+      if (c.windowStart && start === null) errors.push(`${label}: start date/time is invalid.`);
+      if (c.windowEnd && end === null) errors.push(`${label}: end date/time is invalid.`);
+      if (start !== null && end !== null && start >= end) errors.push(`${label}: start must be before end.`);
+    }
+    if (c.kind === "allowList" || c.kind === "denyList") {
+      if (c.recipients.length === 0) errors.push(`${label}: add at least one address, or remove this condition.`);
+      else if (validAddresses(c.recipients).length !== c.recipients.length) {
+        errors.push(`${label}: every address must be a valid 0x… address.`);
+      }
+    }
+  }
+
+  // Actions
+  if (actions.length === 0) {
+    errors.push("Add at least one action.");
+  }
+  for (const a of actions) {
+    const label = ACTION_KIND_LABELS[a.kind];
+    if (a.kind === ActionType.Forward) {
+      if (!isAddress(a.forwardRecipient.trim())) errors.push(`${label}: recipient must be a valid 0x… address.`);
+      const amount = parseUsdcSafe(a.forwardAmount);
+      if (amount === null || amount <= 0n) errors.push(`${label}: amount must be greater than 0.`);
+    }
+    if (a.kind === ActionType.Split) {
+      const total = parseUsdcSafe(a.splitTotal);
+      if (total === null || total <= 0n) errors.push(`${label}: total amount must be greater than 0.`);
+      if (a.splitRecipients.length === 0) errors.push(`${label}: add at least one recipient.`);
+      let bpsSum = 0n;
+      for (const r of a.splitRecipients) {
+        if (!isAddress(r.address.trim())) errors.push(`${label}: every recipient must be a valid 0x… address.`);
+        const bps = parseIntSafe(r.bps);
+        if (bps === null) errors.push(`${label}: every share must be a whole number of basis points (0-10000).`);
+        else bpsSum += bps;
+      }
+      if (bpsSum > 10_000n) errors.push(`${label}: basis points sum to ${bpsSum}, must be ≤ 10000 (100%).`);
+    }
+    if (a.kind === ActionType.Sweep) {
+      if (!isAddress(a.sweepDestination.trim())) errors.push(`${label}: destination must be a valid 0x… address.`);
+      if (a.sweepThreshold.trim() && parseUsdcSafe(a.sweepThreshold) === null) {
+        errors.push(`${label}: threshold must be a valid USDC amount.`);
+      }
+    }
+    if (a.kind === ActionType.LockRelease) {
+      if (!isAddress(a.lockRecipient.trim())) errors.push(`${label}: recipient must be a valid 0x… address.`);
+      const amount = parseUsdcSafe(a.lockAmount);
+      if (amount === null || amount <= 0n) errors.push(`${label}: amount must be greater than 0.`);
+      if (datetimeLocalToUnixSeconds(a.lockReleaseAt) === null) errors.push(`${label}: pick a release date/time.`);
+    }
+  }
+
+  return errors;
+}

@@ -30,6 +30,33 @@ export const canalisExecutorAbi = [
     outputs: [flowAbiParameter],
   },
   {
+    type: "function",
+    name: "setFlowActive",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "flowId", type: "uint256" },
+      { name: "active", type: "bool" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "previewFlow",
+    stateMutability: "view",
+    inputs: [{ name: "flowId", type: "uint256" }],
+    outputs: [
+      { name: "canRun", type: "bool" },
+      { name: "reason", type: "string" },
+    ],
+  },
+  {
+    type: "function",
+    name: "flowsOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "", type: "uint256[]" }],
+  },
+  {
     type: "event",
     name: "FlowRegistered",
     inputs: [
@@ -44,6 +71,25 @@ export const canalisExecutorAbi = [
       { name: "flowId", type: "uint256", indexed: true },
       { name: "triggeredBy", type: "address", indexed: true },
       { name: "timestamp", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ActionExecuted",
+    inputs: [
+      { name: "flowId", type: "uint256", indexed: true },
+      { name: "actionIndex", type: "uint256", indexed: true },
+      { name: "kind", type: "uint8", indexed: false },
+      { name: "recipient", type: "address", indexed: false },
+      { name: "amount", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "FlowActiveSet",
+    inputs: [
+      { name: "flowId", type: "uint256", indexed: true },
+      { name: "active", type: "bool", indexed: false },
     ],
   },
 ] as const;

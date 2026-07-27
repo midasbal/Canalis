@@ -3,6 +3,7 @@ import { useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
 import { canalisAccountFactoryAbi } from "../lib/abi";
 import { CANALIS_ACCOUNT_FACTORY_ADDRESS } from "../lib/contracts";
+import { getRevertReason } from "../lib/errors";
 
 /**
  * Shared "you need a CanalisAccount first" prompt + real create action.
@@ -40,7 +41,7 @@ export function CreateCanalisAccountPrompt({ message }: { message: string }) {
       >
         {creating ? "Creating…" : "Create Canalis account"}
       </button>
-      {createAccount.error && <p className="mt-2 text-xs text-red-400">{createAccount.error.message}</p>}
+      {createAccount.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(createAccount.error)}</p>}
     </>
   );
 }

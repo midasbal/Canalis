@@ -6,7 +6,13 @@ import "./index.css";
 import App from "./App.tsx";
 import { wagmiConfig } from "./wagmi";
 
-const queryClient = new QueryClient();
+// The RPC transport (lib/rateLimitedTransport.ts) already retries
+// rate-limited/timed-out reads with backoff — keep react-query's own retry
+// small so a genuinely failed read still reaches an ERROR state promptly
+// instead of two retry layers compounding into a long hang.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1 } },
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

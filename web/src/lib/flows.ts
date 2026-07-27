@@ -26,6 +26,14 @@ export const ActionType = {
 } as const;
 export type ActionType = (typeof ActionType)[keyof typeof ActionType];
 
+/**
+ * Mirrors Solidity's `type(uint256).max`, the sentinel CanalisExecutor's
+ * `_advanceTrigger` sets a one-shot OnSchedule flow's `scheduleAt` to once
+ * it has run — "never due again", not a literal far-future timestamp.
+ * UI code MUST check for this before formatting `scheduleAt` as a date.
+ */
+export const SCHEDULE_NEVER_AGAIN = 2n ** 256n - 1n;
+
 export interface Trigger {
   kind: TriggerType;
   scheduleAt: bigint;

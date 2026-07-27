@@ -16,3 +16,34 @@ export const CANALIS_ACCOUNT_FACTORY_ADDRESS = (import.meta.env.VITE_CANALIS_ACC
 
 /** Arc testnet USDC ERC-20 interface (system contract), 6 decimals. */
 export const CANALIS_USDC_ADDRESS = (import.meta.env.VITE_USDC_ADDRESS || undefined) as Address | undefined;
+
+/**
+ * Block CanalisExecutor was deployed at. Only used as a lower bound on the
+ * run log's recent-history window (see CANALIS_RUNLOG_LOOKBACK_BLOCKS below)
+ * — never as the scan's start on its own, since deployBlock→head can be
+ * millions of blocks. Undefined is handled honestly (no lower bound beyond
+ * the lookback window) rather than assumed.
+ */
+export const CANALIS_EXECUTOR_DEPLOY_BLOCK = import.meta.env.VITE_CANALIS_EXECUTOR_DEPLOY_BLOCK
+  ? BigInt(import.meta.env.VITE_CANALIS_EXECUTOR_DEPLOY_BLOCK)
+  : undefined;
+
+/**
+ * `eth_getLogs` chunk size for the run log's historical scan and live
+ * catch-up polling. Free-tier RPCs cap this hard — QuickNode as low as 5
+ * blocks, Alchemy 10 — so default conservatively; override with a higher
+ * value only if your provider's plan actually supports it.
+ */
+export const CANALIS_GETLOGS_CHUNK_BLOCKS = import.meta.env.VITE_GETLOGS_CHUNK
+  ? BigInt(import.meta.env.VITE_GETLOGS_CHUNK)
+  : 10n;
+
+/**
+ * How many recent blocks the run log backfills on load. Deliberately NOT
+ * deployBlock→head (could be millions of blocks at ~10/request) — old runs
+ * beyond this window simply aren't backfilled; live polling picks up
+ * everything from here forward.
+ */
+export const CANALIS_RUNLOG_LOOKBACK_BLOCKS = import.meta.env.VITE_RUNLOG_LOOKBACK_BLOCKS
+  ? BigInt(import.meta.env.VITE_RUNLOG_LOOKBACK_BLOCKS)
+  : 500n;

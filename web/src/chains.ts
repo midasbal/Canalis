@@ -1,6 +1,14 @@
 import { defineChain } from "viem";
 
 /**
+ * Public Arc testnet RPC — rate-limits bursts of parallel calls (the same
+ * limit the keeper service had to self-pace around, see keeper/README.md).
+ * Set VITE_ARC_RPC_URL to a keyed endpoint (Alchemy/QuickNode/etc.) to
+ * avoid it; falls back to the public URL honestly if unset.
+ */
+export const ARC_RPC_URL = (import.meta.env.VITE_ARC_RPC_URL as string | undefined) || "https://rpc.testnet.arc.network/";
+
+/**
  * Arc testnet — Circle's stablecoin-native L1 where USDC is the gas token.
  * Values per docs/canalis-spec.md section 10 (confirm against
  * https://docs.arc.io before mainnet use).
@@ -17,7 +25,7 @@ export const arcTestnet = defineChain({
     decimals: 18,
   },
   rpcUrls: {
-    default: { http: ["https://rpc.testnet.arc.network/"] },
+    default: { http: [ARC_RPC_URL] },
   },
   blockExplorers: {
     default: {

@@ -7,6 +7,8 @@ import { CreateCanalisAccountPrompt } from "./CreateCanalisAccountPrompt";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
 import { canalisAccountAbi, erc20Abi } from "../lib/abi";
 import { CANALIS_ACCOUNT_FACTORY_ADDRESS, CANALIS_USDC_ADDRESS } from "../lib/contracts";
+import { arcscanAddressUrl } from "../lib/format";
+import { getRevertReason } from "../lib/errors";
 
 /** Arc testnet USDC's ERC-20 decimals — do not confuse with the 18-decimal native gas token. */
 const USDC_DECIMALS = 6;
@@ -177,7 +179,14 @@ export function AccountFunding() {
   return (
     <Card eyebrow="Account funding" title="Deposit & withdraw USDC">
       <p className="mb-1 text-xs text-ink-faint">CanalisAccount</p>
-      <p className="mb-4 break-all font-mono text-xs text-ink-muted">{accountAddress}</p>
+      <a
+        href={arcscanAddressUrl(accountAddress!)}
+        target="_blank"
+        rel="noreferrer"
+        className="mb-4 block break-all font-mono text-xs text-ink-muted underline underline-offset-2"
+      >
+        {accountAddress}
+      </a>
 
       <div className="mb-5 grid grid-cols-2 gap-4">
         <div>
@@ -226,8 +235,8 @@ export function AccountFunding() {
         </div>
 
         {exceedsWalletBalance && <p className="mt-2 text-xs text-red-400">Amount exceeds your wallet balance.</p>}
-        {approveTx.error && <p className="mt-2 text-xs text-red-400">{approveTx.error.message}</p>}
-        {depositTx.error && <p className="mt-2 text-xs text-red-400">{depositTx.error.message}</p>}
+        {approveTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(approveTx.error)}</p>}
+        {depositTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(depositTx.error)}</p>}
         {depositReceipt.isSuccess && (
           <p className="mt-2 text-xs text-emerald-400">Deposited — balances refreshed.</p>
         )}
@@ -254,7 +263,7 @@ export function AccountFunding() {
             {withdrawing ? "Withdrawing…" : "Withdraw"}
           </button>
         </div>
-        {withdrawTx.error && <p className="mt-2 text-xs text-red-400">{withdrawTx.error.message}</p>}
+        {withdrawTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(withdrawTx.error)}</p>}
         {withdrawReceipt.isSuccess && (
           <p className="mt-2 text-xs text-emerald-400">Withdrawn — balances refreshed.</p>
         )}

@@ -1,20 +1,21 @@
 import { useAccount, useReadContract } from "wagmi";
 import { formatUnits } from "viem";
 import { Card } from "./ui/Card";
-import { EmptyState } from "./ui/EmptyState";
-import { FlowIcon, LogIcon } from "./ui/icons";
 import { AccountFunding } from "./AccountFunding";
+import { DeployedFlows } from "./DeployedFlows";
+import { RunLog } from "./RunLog";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
 import { canalisAccountAbi } from "../lib/abi";
+import { arcscanAddressUrl } from "../lib/format";
 
 /** Arc testnet USDC's ERC-20 decimals — do not confuse with the 18-decimal native gas token. */
 const USDC_DECIMALS = 6;
 
 /**
- * Dashboard: connected account and USDC balance are live via wagmi.
- * Deployed flows and the run log are still honest "not implemented yet"
- * empty states until CanalisExecutor event indexing is wired up — see
- * docs/canalis-spec.md section 7.1 (MVP checklist).
+ * Dashboard: connected account + USDC balance (live), the connected
+ * account's deployed flows with pause/resume/run-now controls and live
+ * `previewFlow` status (slice 5, Stage 2/3), and the run log built from
+ * real FlowExecuted/ActionExecuted events (Stage 3).
  */
 export function Dashboard() {
   const { address, isConnected } = useAccount();
@@ -33,7 +34,14 @@ export function Dashboard() {
         {isConnected && address ? (
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            <span className="font-mono text-sm text-ink">{address}</span>
+            <a
+              href={arcscanAddressUrl(address)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-sm text-ink underline underline-offset-2"
+            >
+              {address}
+            </a>
           </div>
         ) : (
           <p className="text-sm text-ink-muted">Connect a wallet from the header to view account details.</p>
@@ -57,24 +65,12 @@ export function Dashboard() {
           )}
         </Card>
 
-        <Card eyebrow="Flows" title="Deployed flows">
-          <EmptyState
-            icon={<FlowIcon />}
-            title="No flows deployed yet"
-            detail="Listing all deployed flows isn't wired up yet — the Builder tab can deploy and run one Forward flow."
-          />
-        </Card>
+        <DeployedFlows />
       </div>
 
       <AccountFunding />
 
-      <Card eyebrow="Activity" title="Run log">
-        <EmptyState
-          icon={<LogIcon />}
-          title="No executions recorded yet"
-          detail="This will index FlowExecuted / ActionExecuted events and link each run to arcscan."
-        />
-      </Card>
+      <RunLog />
     </div>
   );
 }
