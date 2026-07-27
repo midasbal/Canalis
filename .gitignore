@@ -21,6 +21,7 @@ web/coverage/
 
 # Private docs
 docs/canalis-spec.md
+CLAUDE.md
 
 # OS / editor
 **/.DS_Store
