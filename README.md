@@ -14,11 +14,13 @@ money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 > testnet — all four triggers (Manual, OnSchedule, OnThreshold, OnReceive)
 > and all four actions (Forward, Split, Sweep, LockRelease) work against a
 > user's own on-chain account, gated by real condition guards (balance
-> floor, time window, cooldown, allow/deny recipients, amount cap), and a
-> real off-chain keeper autonomously drives the caller-agnostic triggers.
-> Everything else (the visual builder canvas, most of the dashboard, Circle
-> Wallet/Paymaster) is still stubbed. See [Status](#status) for the exact,
-> honest breakdown.
+> floor, time window, cooldown, allow/deny recipients, amount cap), a real
+> off-chain keeper autonomously drives the caller-agnostic triggers, and
+> flows can be paused/cancelled, dry-run previewed, and enumerated
+> per-owner — the contract-side building blocks the upcoming builder UI
+> needs. Everything else (the visual builder canvas itself, most of the
+> dashboard, Circle Wallet/Paymaster) is still stubbed. See
+> [Status](#status) for the exact, honest breakdown.
 
 ---
 
@@ -146,7 +148,7 @@ canalis/
 │   ├── src/
 │   │   ├── libraries/FlowTypes.sol         # trigger/action enums, Condition/Action/Flow structs
 │   │   ├── interfaces/ICanalisExecutor.sol
-│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 4 actions real)
+│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 4 actions, pause, preview, enumeration)
 │   │   ├── CanalisAccount.sol              # per-user USDC vault + onlyExecutor trust boundary + depositNonce
 │   │   └── CanalisAccountFactory.sol       # one CanalisAccount per owner, self-service
 │   ├── test/
@@ -154,6 +156,10 @@ canalis/
 │   │   ├── CanalisExecutorConditions.t.sol # all 5 Condition guard fields, multi-condition, fuzz
 │   │   ├── CanalisExecutorTriggers.t.sol   # OnSchedule/OnThreshold/OnReceive, catch-up, fuzz
 │   │   ├── CanalisExecutorLockRelease.t.sol # lock/release lifecycle, double-spend/double-release, fuzz
+│   │   ├── CanalisExecutorPause.t.sol      # setFlowActive blocks every trigger type, owner-only, unpause
+│   │   ├── CanalisExecutorEvents.t.sol     # ActionExecuted recipient/amount per action type, incl. Split legs
+│   │   ├── CanalisExecutorPreview.t.sol    # previewFlow vs. real executeFlow, every trigger type + conditions
+│   │   ├── CanalisExecutorEnumeration.t.sol # flowsOf per-owner, in order, doesn't mix owners
 │   │   ├── CanalisAccount.t.sol            # executorTransfer trust boundary, fuzz
 │   │   ├── CanalisAccountFactory.t.sol     # one-account-per-owner
 │   │   └── mocks/MockERC20.sol             # 6-decimal mock USDC for tests
@@ -167,7 +173,10 @@ canalis/
 │   │   ├── prove-onschedule-trigger.sh     # live-testnet proof: OnSchedule (due, catch-up, non-owner keeper caller)
 │   │   ├── prove-onthreshold-trigger.sh    # live-testnet proof: OnThreshold (below blocked, at/above allowed)
 │   │   ├── prove-onreceive-trigger.sh      # live-testnet proof: OnReceive (armed by deposit, no double-fire)
-│   │   └── prove-lockrelease.sh            # live-testnet proof: LockRelease (still-locked, release-once, no double-release)
+│   │   ├── prove-lockrelease.sh            # live-testnet proof: LockRelease (still-locked, release-once, no double-release)
+│   │   ├── prove-pause.sh                  # live-testnet proof: pause blocks execution, unpause restores it
+│   │   ├── prove-preview.sh                # live-testnet proof: previewFlow matches a real executeFlow call
+│   │   └── prove-flowsof.sh                # live-testnet proof: flowsOf lists the owner's registered flow ids
 │   └── .env.example                        # RPC_URL / PRIVATE_KEY placeholders
 ├── keeper/                         # standalone Node/TS + viem keeper service
 │   ├── src/
@@ -267,17 +276,44 @@ canalis/
   human interaction; see `keeper/README.md` for how to run it and the
   trust model (a hot key that only ever calls `executeFlow`; the contract,
   not the caller, is what's trusted).
-- Foundry test suite: **96 passing tests** (13 fuzz tests, 256 runs each)
+- **Pause/cancel** — `setFlowActive(flowId, active)`, owner-only (same
+  auth model as Manual's `executeFlow`), emits `FlowActiveSet`. Blocks
+  execution for every trigger type identically — a paused flow's
+  `executeFlow` reverts "flow inactive" whether it's the owner, a keeper,
+  or anyone else calling it. Proven live on Arc testnet: pause → blocked,
+  unpause → runs (`contracts/script/prove-pause.sh`).
+- **Enriched `ActionExecuted`** — now carries the real `(recipient,
+  amount)` moved by each call, so a run-log UI doesn't have to re-derive
+  it from the action definition. Split emits one event per non-zero leg;
+  Sweep emits an honest `amount == 0` on a no-op, never a fake nonzero;
+  LockRelease's `recipient` is the executor itself while locking and the
+  real recipient only once released.
+- **`previewFlow(flowId) view returns (bool canRun, string reason)`** —
+  non-reverting dry-run sharing the exact same internal check path as
+  `executeFlow` (they literally call the same non-reverting helpers), so
+  the two can never diverge. No state mutation, no transfers. Proven live
+  on Arc testnet by cross-checking a preview's verdict against a real
+  `executeFlow` call for both a not-due and a due flow
+  (`contracts/script/prove-preview.sh`).
+- **`flowsOf(address owner) view returns (uint256[])`** — per-owner flow
+  enumeration (`owner` = the CanalisAccount address, matching `flow.owner`
+  everywhere else), resolving the earlier "no on-chain per-owner
+  enumeration" gap. Proven live on Arc testnet
+  (`contracts/script/prove-flowsof.sh`).
+- Foundry test suite: **129 passing tests** (13 fuzz tests, 256 runs each)
   across `CanalisExecutor`, its condition guards, its triggers, its
-  LockRelease action, `CanalisAccount`, and `CanalisAccountFactory`.
+  LockRelease action, pause, enriched events, preview, per-owner
+  enumeration, `CanalisAccount`, and `CanalisAccountFactory`.
 - Frontend: wagmi/viem configured for Arc testnet (chainId `5042002`),
   injected-wallet connect/disconnect, live `CanalisAccount.balance` read on
   the Dashboard, and one real end-to-end Builder path
   (`DeployForwardFlow.tsx`: create account → compose a Manual+Forward flow
   → `registerFlow` → `executeFlow`, all against the deployed contracts).
-  **Not extended this slice** — no trigger/keeper UI was added; the
-  engine and keeper are proven via `cast`/tests/the keeper service itself,
-  not the frontend.
+  **Not extended this slice or the engine-for-UI addendum** — no
+  trigger/keeper/pause/preview UI was added; everything above is proven
+  via `cast`/tests/the keeper service itself, not the frontend. The
+  addendum exists specifically so the next slice can build the visual
+  builder against a frozen, UI-ready engine.
 
 ### Stubbed (explicit reverts / honest "Coming soon" UI — never faked)
 

@@ -15,15 +15,16 @@ import {CanalisAccount} from "./CanalisAccount.sol";
 /// data and interpreted on execution. This keeps the system to one audited
 /// contract, gas-efficient, and easy to extend with new action types.
 ///
-/// STATUS: slice 4. `flow.owner` is the CanalisAccount the flow is
-/// registered against (see FlowTypes.Flow); the human authorized to
-/// register/manually run a flow is that account's `owner()` (Ownable).
-/// All four triggers (Manual, OnSchedule, OnThreshold, OnReceive) and all
-/// four actions (Forward, Split, Sweep, LockRelease) are implemented; all
-/// Condition guard fields (balance floor, time window, cooldown, allow/deny
-/// recipients, amount cap) are implemented and enforced as a logical AND
-/// across every Condition entry on a flow. See docs/canalis-spec.md
-/// section 7 for the full build checklist.
+/// STATUS: slice 4 + engine-for-UI addendum. `flow.owner` is the
+/// CanalisAccount the flow is registered against (see FlowTypes.Flow); the
+/// human authorized to register/manually run/pause a flow is that
+/// account's `owner()` (Ownable). All four triggers (Manual, OnSchedule,
+/// OnThreshold, OnReceive) and all four actions (Forward, Split, Sweep,
+/// LockRelease) are implemented; all Condition guard fields (balance floor,
+/// time window, cooldown, allow/deny recipients, amount cap) are
+/// implemented and enforced as a logical AND across every Condition entry
+/// on a flow. See docs/canalis-spec.md section 7 for the full build
+/// checklist.
 ///
 /// AUTH & FAILURE MODEL for non-Manual triggers (slice 4 design decision):
 /// Manual stays owner-only (`msg.sender == account.owner()`). OnSchedule,
@@ -36,7 +37,18 @@ import {CanalisAccount} from "./CanalisAccount.sol";
 /// call it speculatively, eat a cheap revert, and move on — it never looks
 /// like a flow "ran" when it didn't. Conditions (the Condition[] guard list)
 /// are evaluated identically regardless of trigger type, always AFTER the
-/// trigger check passes.
+/// trigger check passes. `setFlowActive` (pause/cancel) is checked before
+/// any of this and blocks every trigger type identically, including
+/// keeper-driven ones.
+///
+/// ENGINE-FOR-UI ADDENDUM: `_checkTrigger`/`_checkConditions` are the
+/// single non-reverting source of truth both `executeFlow` (via thin
+/// `require`-wrapping callers `_validateTrigger`/`_evaluateConditions`) and
+/// `previewFlow` build on — the two paths cannot diverge because one calls
+/// the other. `flowsOf` resolves the "no per-owner enumeration" gap flagged
+/// in the slice-4 keeper design. `ActionExecuted` now carries the real
+/// recipient/amount of each transfer (see each action handler's docs for
+/// the exact per-type semantics).
 contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -52,6 +64,13 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// @dev flowId => Flow definition.
     mapping(uint256 => FlowTypes.Flow) private _flows;
     uint256 private _nextFlowId;
+
+    /// @dev owner (a CanalisAccount address, i.e. `flow.owner`) => flow ids
+    /// registered against it, in registration order. Powers `flowsOf` —
+    /// resolves the earlier "no per-owner enumeration" gap. Append-only:
+    /// pausing/cancelling a flow (`setFlowActive`) does not remove it here,
+    /// it stays listed with `active == false` (see `getFlow`).
+    mapping(address => uint256[]) private _flowsByOwner;
 
     /// @dev flowId => the account's `depositNonce` value already consumed
     /// by an OnReceive execution of that flow. See `_validateTrigger`.
@@ -101,7 +120,20 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             _lastConsumedDepositNonce[flowId] = CanalisAccount(flow.owner).depositNonce();
         }
 
+        _flowsByOwner[flow.owner].push(flowId);
+
         emit FlowRegistered(flowId, flow.owner);
+    }
+
+    /// @inheritdoc ICanalisExecutor
+    function setFlowActive(uint256 flowId, bool active) external flowExists(flowId) {
+        FlowTypes.Flow storage flow = _flows[flowId];
+        // Same auth model as executeFlow's Manual path: only the human
+        // wallet that owns the flow's CanalisAccount may pause/unpause it,
+        // regardless of the flow's trigger type.
+        require(msg.sender == CanalisAccount(flow.owner).owner(), "CanalisExecutor: caller is not flow owner");
+        flow.active = active;
+        emit FlowActiveSet(flowId, active);
     }
 
     /// @inheritdoc ICanalisExecutor
@@ -126,39 +158,70 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         return _flows[flowId];
     }
 
+    /// @inheritdoc ICanalisExecutor
+    function previewFlow(uint256 flowId) external view flowExists(flowId) returns (bool canRun, string memory reason) {
+        FlowTypes.Flow storage flow = _flows[flowId];
+
+        if (!flow.active) return (false, "CanalisExecutor: flow inactive");
+
+        (canRun, reason) = _checkTrigger(flowId, flow);
+        if (!canRun) return (canRun, reason);
+
+        return _checkConditions(flowId, flow);
+    }
+
+    /// @inheritdoc ICanalisExecutor
+    function flowsOf(address owner) external view returns (uint256[] memory) {
+        return _flowsByOwner[owner];
+    }
+
     // ---------------------------------------------------------------------
     // Internal: trigger validation
     // ---------------------------------------------------------------------
 
-    /// @dev Confirms the flow's trigger currently permits execution. See
-    /// the class-level AUTH & FAILURE MODEL docs: Manual is caller-gated
-    /// (owner only); OnSchedule/OnThreshold/OnReceive are caller-agnostic
-    /// and instead re-verify their on-chain precondition, reverting with a
-    /// specific reason when it doesn't hold rather than silently no-op'ing.
+    /// @dev Reverting wrapper around `_checkTrigger`, used by `executeFlow`.
+    /// See the class-level AUTH & FAILURE MODEL docs: Manual is
+    /// caller-gated (owner only); OnSchedule/OnThreshold/OnReceive are
+    /// caller-agnostic and instead re-verify their on-chain precondition,
+    /// reverting with a specific reason when it doesn't hold rather than
+    /// silently no-op'ing.
     function _validateTrigger(uint256 flowId, FlowTypes.Flow storage flow) internal view {
+        (bool ok, string memory reason) = _checkTrigger(flowId, flow);
+        require(ok, reason);
+    }
+
+    /// @dev Non-reverting trigger check — the single source of truth both
+    /// `_validateTrigger` (executeFlow's revert path) and `previewFlow`
+    /// build on, so the two can never diverge. See `_validateTrigger` for
+    /// the per-trigger-type semantics; this returns the same verdict as a
+    /// (bool, reason) pair instead of reverting.
+    function _checkTrigger(uint256 flowId, FlowTypes.Flow storage flow) internal view returns (bool, string memory) {
         FlowTypes.TriggerType kind = flow.trigger.kind;
 
         if (kind == FlowTypes.TriggerType.Manual) {
-            require(msg.sender == CanalisAccount(flow.owner).owner(), "CanalisExecutor: caller is not flow owner");
-            return;
+            if (msg.sender != CanalisAccount(flow.owner).owner()) {
+                return (false, "CanalisExecutor: caller is not flow owner");
+            }
+            return (true, "");
         }
 
         if (kind == FlowTypes.TriggerType.OnSchedule) {
             // `trigger.scheduleAt` doubles as "next run at" — see
             // `_advanceTrigger`, which mutates it forward on every
             // successful execution.
-            require(block.timestamp >= flow.trigger.scheduleAt, "CanalisExecutor: schedule not due");
-            return;
+            if (block.timestamp < flow.trigger.scheduleAt) {
+                return (false, "CanalisExecutor: schedule not due");
+            }
+            return (true, "");
         }
 
         if (kind == FlowTypes.TriggerType.OnThreshold) {
             // Direction is validated once at registration (only "at/above"
             // is supported this slice); re-check the live balance here.
-            require(
-                CanalisAccount(flow.owner).balance() >= flow.trigger.thresholdAmount,
-                "CanalisExecutor: threshold not met"
-            );
-            return;
+            if (CanalisAccount(flow.owner).balance() < flow.trigger.thresholdAmount) {
+                return (false, "CanalisExecutor: threshold not met");
+            }
+            return (true, "");
         }
 
         if (kind == FlowTypes.TriggerType.OnReceive) {
@@ -167,11 +230,13 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             // that arrived since this flow last consumed one. See
             // `_advanceTrigger` for the consuming side.
             uint256 depositNonce = CanalisAccount(flow.owner).depositNonce();
-            require(depositNonce > _lastConsumedDepositNonce[flowId], "CanalisExecutor: no new deposit to consume");
-            return;
+            if (depositNonce <= _lastConsumedDepositNonce[flowId]) {
+                return (false, "CanalisExecutor: no new deposit to consume");
+            }
+            return (true, "");
         }
 
-        revert("CanalisExecutor: unknown trigger type");
+        return (false, "CanalisExecutor: unknown trigger type");
     }
 
     /// @dev Advances trigger-specific state after a successful execution
@@ -209,36 +274,57 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     // Internal: condition evaluation
     // ---------------------------------------------------------------------
 
-    /// @dev Evaluates every Condition entry on the flow as a logical AND —
-    /// every field set on every entry must hold, in order: balance floor,
-    /// time window, cooldown, allow/deny recipients, amount cap. The first
-    /// field that fails reverts immediately with a specific reason; nothing
-    /// here ever silently passes an unmet guard. A flow with zero Condition
-    /// entries has nothing to check and falls through.
-    ///
-    /// Each check is a self-contained, side-effect-free `view` function
-    /// keyed off `flow`/`condition` alone — this is a deliberate seam so a
-    /// future keeper-driven "skip rather than revert" path can reuse the
-    /// same per-field logic without restructuring it.
+    /// @dev Reverting wrapper around `_checkConditions`, used by
+    /// `executeFlow`.
     function _evaluateConditions(uint256 flowId, FlowTypes.Flow storage flow) internal view {
+        (bool ok, string memory reason) = _checkConditions(flowId, flow);
+        require(ok, reason);
+    }
+
+    /// @dev Non-reverting condition check — the single source of truth
+    /// both `_evaluateConditions` (executeFlow's revert path) and
+    /// `previewFlow` build on, so the two can never diverge. Evaluates
+    /// every Condition entry on the flow as a logical AND — every field set
+    /// on every entry must hold, in order: balance floor, time window,
+    /// cooldown, allow/deny recipients, amount cap. Returns the first unmet
+    /// field's reason, or (true, "") if every field on every entry passes.
+    /// A flow with zero Condition entries has nothing to check and passes
+    /// trivially.
+    ///
+    /// Each per-field check is a self-contained, side-effect-free `view`
+    /// function keyed off `flow`/`condition` alone.
+    function _checkConditions(uint256 flowId, FlowTypes.Flow storage flow) internal view returns (bool, string memory) {
         for (uint256 i = 0; i < flow.conditions.length; i++) {
             FlowTypes.Condition storage condition = flow.conditions[i];
+            bool ok;
+            string memory reason;
 
-            _checkBalanceFloor(flow.owner, condition);
-            _checkTimeWindow(condition);
-            _checkCooldown(flow, condition);
-            _checkRecipients(flow, condition);
-            _checkAmountCap(flowId, flow.owner, flow, condition);
+            (ok, reason) = _checkBalanceFloor(flow.owner, condition);
+            if (!ok) return (false, reason);
+            (ok, reason) = _checkTimeWindow(condition);
+            if (!ok) return (false, reason);
+            (ok, reason) = _checkCooldown(flow, condition);
+            if (!ok) return (false, reason);
+            (ok, reason) = _checkRecipients(flow, condition);
+            if (!ok) return (false, reason);
+            (ok, reason) = _checkAmountCap(flowId, flow.owner, flow, condition);
+            if (!ok) return (false, reason);
         }
+        return (true, "");
     }
 
     /// @dev Condition.minBalance: the account's live USDC balance must be
     /// at least `minBalance`. Sentinel: 0 = unset (no floor enforced).
-    function _checkBalanceFloor(address account, FlowTypes.Condition storage condition) internal view {
-        if (condition.minBalance == 0) return;
-        require(
-            CanalisAccount(account).balance() >= condition.minBalance, "CanalisExecutor: balance below minimum"
-        );
+    function _checkBalanceFloor(address account, FlowTypes.Condition storage condition)
+        internal
+        view
+        returns (bool, string memory)
+    {
+        if (condition.minBalance == 0) return (true, "");
+        if (CanalisAccount(account).balance() < condition.minBalance) {
+            return (false, "CanalisExecutor: balance below minimum");
+        }
+        return (true, "");
     }
 
     /// @dev Condition.windowStart/windowEnd: block.timestamp must fall
@@ -246,13 +332,14 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// optional — sentinel: 0 = unset for that bound, so a flow can be
     /// "no earlier than X" (windowEnd unset), "no later than Y" (windowStart
     /// unset), or a closed [X, Y] range (both set).
-    function _checkTimeWindow(FlowTypes.Condition storage condition) internal view {
-        if (condition.windowStart > 0) {
-            require(block.timestamp >= condition.windowStart, "CanalisExecutor: before time window");
+    function _checkTimeWindow(FlowTypes.Condition storage condition) internal view returns (bool, string memory) {
+        if (condition.windowStart > 0 && block.timestamp < condition.windowStart) {
+            return (false, "CanalisExecutor: before time window");
         }
-        if (condition.windowEnd > 0) {
-            require(block.timestamp <= condition.windowEnd, "CanalisExecutor: after time window");
+        if (condition.windowEnd > 0 && block.timestamp > condition.windowEnd) {
+            return (false, "CanalisExecutor: after time window");
         }
+        return (true, "");
     }
 
     /// @dev Condition.cooldownSeconds: at least this many seconds must have
@@ -260,13 +347,17 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// successful run — see there). Sentinel: 0 = unset (no cooldown). A
     /// flow that has never executed (lastExecutedAt == 0) always passes:
     /// there is no prior run to cool down from.
-    function _checkCooldown(FlowTypes.Flow storage flow, FlowTypes.Condition storage condition) internal view {
-        if (condition.cooldownSeconds == 0) return;
-        if (flow.lastExecutedAt == 0) return;
-        require(
-            block.timestamp - flow.lastExecutedAt >= condition.cooldownSeconds,
-            "CanalisExecutor: cooldown not elapsed"
-        );
+    function _checkCooldown(FlowTypes.Flow storage flow, FlowTypes.Condition storage condition)
+        internal
+        view
+        returns (bool, string memory)
+    {
+        if (condition.cooldownSeconds == 0) return (true, "");
+        if (flow.lastExecutedAt == 0) return (true, "");
+        if (block.timestamp - flow.lastExecutedAt < condition.cooldownSeconds) {
+            return (false, "CanalisExecutor: cooldown not elapsed");
+        }
+        return (true, "");
     }
 
     /// @dev Condition.allowedRecipients/deniedRecipients: every recipient
@@ -274,31 +365,32 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// Split: all of recipients; Sweep: recipients[0]) must appear in
     /// allowedRecipients when that list is non-empty, and must never appear
     /// in deniedRecipients. Sentinel: empty array = no restriction for that
-    /// list. Reverts name the offending recipient's address.
-    function _checkRecipients(FlowTypes.Flow storage flow, FlowTypes.Condition storage condition) internal view {
+    /// list. The reason names the offending recipient's address.
+    function _checkRecipients(FlowTypes.Flow storage flow, FlowTypes.Condition storage condition)
+        internal
+        view
+        returns (bool, string memory)
+    {
         bool hasAllowlist = condition.allowedRecipients.length > 0;
         bool hasDenylist = condition.deniedRecipients.length > 0;
-        if (!hasAllowlist && !hasDenylist) return;
+        if (!hasAllowlist && !hasDenylist) return (true, "");
 
         for (uint256 a = 0; a < flow.actions.length; a++) {
             address[] storage recipients = flow.actions[a].recipients;
             for (uint256 r = 0; r < recipients.length; r++) {
                 address recipient = recipients[r];
 
-                if (hasDenylist) {
-                    require(
-                        !_containsAddress(condition.deniedRecipients, recipient),
-                        string.concat("CanalisExecutor: recipient denied: ", Strings.toHexString(recipient))
-                    );
+                if (hasDenylist && _containsAddress(condition.deniedRecipients, recipient)) {
+                    return (false, string.concat("CanalisExecutor: recipient denied: ", Strings.toHexString(recipient)));
                 }
-                if (hasAllowlist) {
-                    require(
-                        _containsAddress(condition.allowedRecipients, recipient),
-                        string.concat("CanalisExecutor: recipient not allowed: ", Strings.toHexString(recipient))
+                if (hasAllowlist && !_containsAddress(condition.allowedRecipients, recipient)) {
+                    return (
+                        false, string.concat("CanalisExecutor: recipient not allowed: ", Strings.toHexString(recipient))
                     );
                 }
             }
         }
+        return (true, "");
     }
 
     function _containsAddress(address[] storage list, address target) internal view returns (bool) {
@@ -323,16 +415,17 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         address account,
         FlowTypes.Flow storage flow,
         FlowTypes.Condition storage condition
-    ) internal view {
-        if (condition.minAmount == 0 && condition.maxAmount == 0) return;
+    ) internal view returns (bool, string memory) {
+        if (condition.minAmount == 0 && condition.maxAmount == 0) return (true, "");
 
         uint256 total = _totalAmountMoved(flowId, account, flow);
-        if (condition.minAmount > 0) {
-            require(total >= condition.minAmount, "CanalisExecutor: amount below minimum");
+        if (condition.minAmount > 0 && total < condition.minAmount) {
+            return (false, "CanalisExecutor: amount below minimum");
         }
-        if (condition.maxAmount > 0) {
-            require(total <= condition.maxAmount, "CanalisExecutor: amount exceeds cap");
+        if (condition.maxAmount > 0 && total > condition.maxAmount) {
+            return (false, "CanalisExecutor: amount exceeds cap");
         }
+        return (true, "");
     }
 
     function _totalAmountMoved(uint256 flowId, address account, FlowTypes.Flow storage flow)
@@ -363,23 +456,26 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
 
     /// @dev Routes a single action to its type-specific handler. `account`
     /// is the flow's CanalisAccount (flow.owner) — the vault a handler
-    /// pulls funds from via its onlyExecutor-gated `executorTransfer`.
+    /// pulls funds from via its onlyExecutor-gated `executorTransfer`. Each
+    /// handler emits its own `ActionExecuted` event(s) for the real
+    /// transfer(s) it performs — see each handler's docs for the exact
+    /// recipient/amount semantics (this varies for Split's N legs and
+    /// LockRelease's two phases; see ICanalisExecutor's event docs for the
+    /// summary).
     function _dispatchAction(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
         internal
     {
         if (action.kind == FlowTypes.ActionType.Split) {
-            _handleSplit(account, action);
+            _handleSplit(flowId, actionIndex, account, action);
         } else if (action.kind == FlowTypes.ActionType.Forward) {
-            _handleForward(account, action);
+            _handleForward(flowId, actionIndex, account, action);
         } else if (action.kind == FlowTypes.ActionType.Sweep) {
-            _handleSweep(account, action);
+            _handleSweep(flowId, actionIndex, account, action);
         } else if (action.kind == FlowTypes.ActionType.LockRelease) {
             _handleLockRelease(flowId, actionIndex, account, action);
         } else {
             revert("CanalisExecutor: unknown action type");
         }
-
-        emit ActionExecuted(flowId, actionIndex, action.kind);
     }
 
     /// @dev Distributes `action.fixedAmount` (the total) across
@@ -390,7 +486,18 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// not a bug, there is nowhere else for a fractional/unassigned share
     /// to go. Recipients with a 0 bps share are skipped rather than making
     /// a zero-amount `executorTransfer` call (which would revert).
-    function _handleSplit(address account, FlowTypes.Action storage action) internal {
+    ///
+    /// EVENT SHAPE: emits one `ActionExecuted` per recipient that actually
+    /// received a non-zero share (per-transfer, not a single aggregate
+    /// event) — this lets the UI show each leg of a split individually,
+    /// matching what real per-recipient transfers happened. A recipient
+    /// whose share rounds to 0 gets no event, matching that nothing moved
+    /// for it. If every share rounds to 0 (only possible with a very small
+    /// `fixedAmount` and small bps), no `ActionExecuted` fires for this
+    /// action at all — honest, since nothing moved.
+    function _handleSplit(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
+        internal
+    {
         uint256 n = action.recipients.length;
         require(n >= 1, "CanalisExecutor: Split requires at least one recipient");
         require(n == action.amountsOrBps.length, "CanalisExecutor: Split recipients/bps length mismatch");
@@ -407,39 +514,48 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             uint256 share = (action.fixedAmount * action.amountsOrBps[i]) / 10_000;
             if (share > 0) {
                 CanalisAccount(account).executorTransfer(action.recipients[i], share);
+                emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.Split, action.recipients[i], share);
             }
         }
     }
 
     /// @dev Moves `action.fixedAmount` USDC from `account` to
     /// `action.recipients[0]`, via CanalisAccount's onlyExecutor-gated
-    /// `executorTransfer`. This is the only action implemented in this
-    /// slice.
-    function _handleForward(address account, FlowTypes.Action storage action) internal {
+    /// `executorTransfer`.
+    function _handleForward(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
+        internal
+    {
         require(action.recipients.length == 1, "CanalisExecutor: Forward requires exactly one recipient");
         require(action.fixedAmount > 0, "CanalisExecutor: Forward amount must be positive");
 
         CanalisAccount(account).executorTransfer(action.recipients[0], action.fixedAmount);
+        emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.Forward, action.recipients[0], action.fixedAmount);
     }
 
     /// @dev Moves whatever `account` holds above `action.sweepThreshold` to
     /// `action.recipients[0]`. If the current balance is at or below the
     /// threshold there is nothing to sweep — this is an honest no-op (no
     /// `executorTransfer` call, no fake movement); `ActionExecuted` still
-    /// fires from `_dispatchAction` either way, since reaching that point
-    /// without reverting is itself meaningful (the sweep ran, it just had
-    /// nothing to do).
-    function _handleSweep(address account, FlowTypes.Action storage action) internal {
+    /// fires either way (amount=0 in the no-op case, never a fake nonzero),
+    /// since reaching this point without reverting is itself meaningful
+    /// (the sweep ran, it just had nothing to do).
+    function _handleSweep(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
+        internal
+    {
         require(action.recipients.length >= 1, "CanalisExecutor: Sweep requires a destination");
         address destination = action.recipients[0];
         require(destination != address(0), "CanalisExecutor: Sweep destination cannot be zero address");
 
         uint256 currentBalance = CanalisAccount(account).balance();
         uint256 threshold = action.sweepThreshold;
+        uint256 swept = 0;
 
         if (currentBalance > threshold) {
-            CanalisAccount(account).executorTransfer(destination, currentBalance - threshold);
+            swept = currentBalance - threshold;
+            CanalisAccount(account).executorTransfer(destination, swept);
         }
+
+        emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.Sweep, destination, swept);
     }
 
     /// @dev Two-phase escrow keyed by (flowId, actionIndex):
@@ -468,6 +584,14 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// - Any call once Released: reverts "already released" — release can
     ///   only ever happen once per (flowId, actionIndex), so double-release
     ///   is structurally impossible, not just guarded against.
+    ///
+    /// EVENT SHAPE: `ActionExecuted.recipient` is the ACTUAL destination of
+    /// THIS call's real transfer — `address(this)` (the executor) while
+    /// locking, the flow's configured `action.recipients[0]` only once
+    /// released. This is deliberately not always "the final recipient",
+    /// because during the lock phase the funds genuinely have not gone to
+    /// them yet; a UI can tell the two phases apart by comparing
+    /// `recipient` against the executor's own address.
     function _handleLockRelease(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
         internal
     {
@@ -482,6 +606,7 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         if (state == LockState.None) {
             _lockState[flowId][actionIndex] = LockState.Locked;
             CanalisAccount(account).executorTransfer(address(this), action.fixedAmount);
+            emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.LockRelease, address(this), action.fixedAmount);
             return;
         }
 
@@ -490,5 +615,6 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
 
         _lockState[flowId][actionIndex] = LockState.Released;
         IERC20(CanalisAccount(account).usdc()).safeTransfer(recipient, action.fixedAmount);
+        emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.LockRelease, recipient, action.fixedAmount);
     }
 }
