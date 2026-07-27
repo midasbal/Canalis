@@ -13,3 +13,6 @@ export const CANALIS_EXECUTOR_ADDRESS = (import.meta.env.VITE_CANALIS_EXECUTOR_A
 export const CANALIS_ACCOUNT_FACTORY_ADDRESS = (import.meta.env.VITE_CANALIS_ACCOUNT_FACTORY_ADDRESS || undefined) as
   | Address
   | undefined;
+
+/** Arc testnet USDC ERC-20 interface (system contract), 6 decimals. */
+export const CANALIS_USDC_ADDRESS = (import.meta.env.VITE_USDC_ADDRESS || undefined) as Address | undefined;

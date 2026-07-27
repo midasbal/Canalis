@@ -4,8 +4,9 @@ import { decodeEventLog, isAddress, parseUnits } from "viem";
 import type { Address } from "viem";
 import { Card } from "./ui/Card";
 import { Badge } from "./ui/Badge";
+import { CreateCanalisAccountPrompt } from "./CreateCanalisAccountPrompt";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
-import { canalisAccountFactoryAbi, canalisExecutorAbi } from "../lib/abi";
+import { canalisExecutorAbi } from "../lib/abi";
 import { CANALIS_ACCOUNT_FACTORY_ADDRESS, CANALIS_EXECUTOR_ADDRESS } from "../lib/contracts";
 import { ActionType, TriggerType, encodeFlow, type Flow } from "../lib/flows";
 
@@ -47,26 +48,17 @@ function buildManualForwardFlow(account: Address, recipient: Address, amount: bi
  */
 export function DeployForwardFlow() {
   const { isConnected } = useAccount();
-  const { accountAddress, hasAccount, isLoading: accountLoading, refetchAccount } = useCanalisAccount();
+  const { accountAddress, hasAccount, isLoading: accountLoading } = useCanalisAccount();
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [flowId, setFlowId] = useState<bigint | null>(null);
-
-  const createAccount = useWriteContract();
-  const createAccountReceipt = useWaitForTransactionReceipt({ hash: createAccount.data });
 
   const registerFlow = useWriteContract();
   const registerFlowReceipt = useWaitForTransactionReceipt({ hash: registerFlow.data });
 
   const runFlow = useWriteContract();
   const runFlowReceipt = useWaitForTransactionReceipt({ hash: runFlow.data });
-
-  useEffect(() => {
-    if (createAccountReceipt.isSuccess) {
-      refetchAccount();
-    }
-  }, [createAccountReceipt.isSuccess, refetchAccount]);
 
   useEffect(() => {
     if (!registerFlowReceipt.isSuccess || !registerFlowReceipt.data) return;
@@ -112,24 +104,9 @@ export function DeployForwardFlow() {
   }
 
   if (!hasAccount) {
-    const creating = createAccount.isPending || createAccountReceipt.isLoading;
     return (
       <Card eyebrow="Deploy" title="Deploy a Forward flow">
-        <p className="mb-4 text-sm text-ink-muted">You need a CanalisAccount before you can deploy a flow.</p>
-        <button
-          onClick={() =>
-            createAccount.writeContract({
-              address: CANALIS_ACCOUNT_FACTORY_ADDRESS!,
-              abi: canalisAccountFactoryAbi,
-              functionName: "createAccount",
-            })
-          }
-          disabled={creating}
-          className="rounded-xl bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {creating ? "Creating…" : "Create Canalis account"}
-        </button>
-        {createAccount.error && <p className="mt-2 text-xs text-red-400">{createAccount.error.message}</p>}
+        <CreateCanalisAccountPrompt message="You need a CanalisAccount before you can deploy a flow." />
       </Card>
     );
   }

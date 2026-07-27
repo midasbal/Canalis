@@ -3,6 +3,7 @@ import { formatUnits } from "viem";
 import { Card } from "./ui/Card";
 import { EmptyState } from "./ui/EmptyState";
 import { FlowIcon, LogIcon } from "./ui/icons";
+import { AccountFunding } from "./AccountFunding";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
 import { canalisAccountAbi } from "../lib/abi";
 
@@ -64,6 +65,8 @@ export function Dashboard() {
           />
         </Card>
       </div>
+
+      <AccountFunding />
 
       <Card eyebrow="Activity" title="Run log">
         <EmptyState
