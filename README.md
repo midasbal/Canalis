@@ -12,10 +12,11 @@ money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 
 > Status: a real subset of the MVP is deployed and proven end-to-end on Arc
 > testnet — a Manual-trigger flow can Forward, Split, or Sweep real USDC
-> through a user's own on-chain account. Everything else (other triggers,
-> conditions, the keeper, most of the dashboard, drag-and-drop composition,
-> Circle Wallet/Paymaster) is still stubbed. See [Status](#status) for the
-> exact, honest breakdown.
+> through a user's own on-chain account, gated by real condition guards
+> (balance floor, time window, cooldown, allow/deny recipients, amount
+> cap). Everything else (other triggers, the keeper, most of the
+> dashboard, drag-and-drop composition, Circle Wallet/Paymaster) is still
+> stubbed. See [Status](#status) for the exact, honest breakdown.
 
 ---
 
@@ -123,10 +124,15 @@ conditions, etc. are extended/future scope, tracked privately).
 **Condition guard fields:** amount cap (min/max), cooldown, time window,
 minimum balance, allow/deny recipient lists.
 
-All of the above exist as on-chain data types. **`Manual` (trigger) and
-`Forward`/`Split`/`Sweep` (actions) execute real logic today** — proven on
-Arc testnet, moving real USDC. Everything else — the other three trigger
-types, `LockRelease`, and all condition evaluation — is an explicit, tested
+All of the above exist as on-chain data types. **`Manual` (trigger),
+`Forward`/`Split`/`Sweep` (actions), and every Condition guard field
+execute real logic today** — proven on Arc testnet, moving real USDC and
+genuinely blocking flows that violate a guard. Conditions on a flow are
+evaluated as a logical AND (every field on every `Condition` entry must
+hold) after trigger validation and before any action runs; the first
+unmet field reverts with a specific reason (e.g. `"CanalisExecutor:
+amount exceeds cap"`), never a silent skip. Everything else — the other
+three trigger types and `LockRelease` — is an explicit, tested
 `revert("... not yet implemented")`, never a silent no-op. See
 [Status](#status) for the precise breakdown.
 
@@ -143,6 +149,7 @@ canalis/
 │   │   └── CanalisAccountFactory.sol       # one CanalisAccount per owner, self-service
 │   ├── test/
 │   │   ├── CanalisExecutor.t.sol           # registerFlow/executeFlow, Forward/Split/Sweep, fuzz
+│   │   ├── CanalisExecutorConditions.t.sol # all 5 Condition guard fields, multi-condition, fuzz
 │   │   ├── CanalisAccount.t.sol            # executorTransfer trust boundary, fuzz
 │   │   ├── CanalisAccountFactory.t.sol     # one-account-per-owner
 │   │   └── mocks/MockERC20.sol             # 6-decimal mock USDC for tests
@@ -150,7 +157,9 @@ canalis/
 │   │   ├── Deploy.s.sol                    # deploys Executor + Factory + deployer's account
 │   │   ├── prove-forward-flow.sh           # live-testnet proof: Forward (cast-based, see gotcha above)
 │   │   ├── prove-split-flow.sh             # live-testnet proof: Split
-│   │   └── prove-sweep-flow.sh             # live-testnet proof: Sweep
+│   │   ├── prove-sweep-flow.sh             # live-testnet proof: Sweep
+│   │   ├── prove-amount-cap-condition.sh   # live-testnet proof: amount-cap condition (block + allow)
+│   │   └── prove-cooldown-condition.sh     # live-testnet proof: cooldown condition (block + allow)
 │   └── .env.example                        # RPC_URL / PRIVATE_KEY placeholders
 └── web/                            # Vite + React + TS frontend
     ├── src/
@@ -199,8 +208,23 @@ canalis/
   threshold to one destination; an honest no-op — no fake transfer — when
   balance is at or below the threshold). All three proven with real
   transactions on Arc testnet (see `contracts/script/prove-*.sh`).
-- Foundry test suite: **44 passing tests** (4 fuzz tests, 256+ runs each)
-  across `CanalisExecutor`, `CanalisAccount`, and `CanalisAccountFactory`.
+- Conditions (all 5 guard fields): **balance floor** (`minBalance`),
+  **time window** (`windowStart`/`windowEnd`, each independently
+  open-ended), **cooldown** (`cooldownSeconds`, measured from
+  `lastExecutedAt`), **allow/deny recipients** (checked against every
+  action's outgoing recipient(s), revert names the offending address),
+  and **amount cap** (`minAmount`/`maxAmount`, bounding the total moved
+  across all of a flow's actions — Forward/Split contribute
+  `fixedAmount`, Sweep contributes `balance - sweepThreshold`). Evaluated
+  as a logical AND across every `Condition` entry on a flow; the first
+  unmet field reverts with a specific reason. Amount cap and cooldown
+  both proven live on Arc testnet (`contracts/script/prove-amount-cap-condition.sh`,
+  `prove-cooldown-condition.sh`) — a flow that violates the guard is
+  blocked with the exact revert reason, the same flow within the guard
+  succeeds and moves USDC.
+- Foundry test suite: **70 passing tests** (8 fuzz tests, 256+ runs each)
+  across `CanalisExecutor`, its condition guards, `CanalisAccount`, and
+  `CanalisAccountFactory`.
 - Frontend: wagmi/viem configured for Arc testnet (chainId `5042002`),
   injected-wallet connect/disconnect, live `CanalisAccount.balance` read on
   the Dashboard, and one real end-to-end Builder path
@@ -213,14 +237,13 @@ canalis/
   `CanalisExecutor._validateTrigger` reverts for anything but `Manual`.
 - `LockRelease` action — `CanalisExecutor._handleLockRelease` reverts
   unconditionally.
-- Condition evaluation (cap/cooldown/time-window/balance/allow-deny) — any
-  flow with one or more conditions reverts; only zero-condition flows run.
 - Keeper service for `OnSchedule`/`OnThreshold` — no code exists yet.
 - Flow builder drag-and-drop composition — `BuilderCanvas.tsx`'s palette is
   static; the "Deploy from canvas" button is disabled by design. Only the
   Forward-flow form (`DeployForwardFlow.tsx`) is wired to
-  `registerFlow`/`executeFlow` today — Split/Sweep are real in the
-  contract but not yet exposed as Builder UI.
+  `registerFlow`/`executeFlow` today — Split/Sweep and every Condition
+  guard are real in the contract but not yet exposed as Builder UI (the
+  deploy form always registers a zero-condition flow).
 - Dashboard "Deployed flows" and "Run log" cards — placeholder `EmptyState`,
   zero event indexing behind them. Balance is the only live read.
 - Circle Wallet onboarding and Gas Station/Paymaster sponsorship — no
