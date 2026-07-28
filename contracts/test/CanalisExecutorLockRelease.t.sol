@@ -24,7 +24,7 @@ contract CanalisExecutorLockReleaseTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor();
+        executor = new CanalisExecutor(makeAddr("swapPool"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -63,7 +63,10 @@ contract CanalisExecutorLockReleaseTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: amount,
             sweepThreshold: 0,
-            unlockTime: unlockTime
+            unlockTime: unlockTime,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
     }
@@ -167,7 +170,10 @@ contract CanalisExecutorLockReleaseTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 0,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         sweepFlow.actions = actions;
         uint256 sweepFlowId = _register(sweepFlow);

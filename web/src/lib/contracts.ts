@@ -17,6 +17,14 @@ export const CANALIS_ACCOUNT_FACTORY_ADDRESS = (import.meta.env.VITE_CANALIS_ACC
 /** Arc testnet USDC ERC-20 interface (system contract), 6 decimals. */
 export const CANALIS_USDC_ADDRESS = (import.meta.env.VITE_USDC_ADDRESS || undefined) as Address | undefined;
 
+/** Arc testnet EURC ERC-20 interface, 6 decimals — the Swap action's other token. */
+export const CANALIS_EURC_ADDRESS = (import.meta.env.VITE_EURC_ADDRESS || undefined) as Address | undefined;
+
+/** CanalisSwapPool — the self-built USDC/EURC constant-product AMM every Swap action routes through. */
+export const CANALIS_SWAP_POOL_ADDRESS = (import.meta.env.VITE_CANALIS_SWAP_POOL_ADDRESS || undefined) as
+  | Address
+  | undefined;
+
 /**
  * Block CanalisExecutor was deployed at. Only used as a lower bound on the
  * run log's recent-history window (see CANALIS_RUNLOG_LOOKBACK_BLOCKS below)

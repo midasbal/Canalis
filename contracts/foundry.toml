@@ -6,6 +6,11 @@ remappings = [
     "forge-std/=lib/forge-std/src/",
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
 ]
+# CanalisExecutor exceeded the EIP-170 24,576-byte contract size limit once
+# the Swap action was added; the optimizer (previously off) is required to
+# fit under it.
+optimizer = true
+optimizer_runs = 200
 
 [rpc_endpoints]
 arc_testnet = "${RPC_URL}"

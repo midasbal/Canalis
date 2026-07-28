@@ -1,5 +1,13 @@
 import { ActionType, SCHEDULE_NEVER_AGAIN, TriggerType, type Action, type Condition, type Flow, type Trigger } from "./flows";
 import { formatDuration, formatTimestamp, formatUsdc, shortAddress } from "./format";
+import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
+
+/** Resolves a token address to a readable symbol where known (USDC/EURC), else a shortened address. */
+function tokenSymbol(address: string): string {
+  if (CANALIS_USDC_ADDRESS && address.toLowerCase() === CANALIS_USDC_ADDRESS.toLowerCase()) return "USDC";
+  if (CANALIS_EURC_ADDRESS && address.toLowerCase() === CANALIS_EURC_ADDRESS.toLowerCase()) return "EURC";
+  return shortAddress(address);
+}
 
 /**
  * Builds a plain-English sentence describing a Flow — used both for the
@@ -90,6 +98,8 @@ function summarizeAction(action: Action): string {
       return `sweep everything above ${formatUsdc(action.sweepThreshold)} USDC to ${shortAddress(action.recipients[0] ?? "0x0")}`;
     case ActionType.LockRelease:
       return `lock ${formatUsdc(action.fixedAmount)} USDC, releasable to ${shortAddress(action.recipients[0] ?? "0x0")} at ${formatTimestamp(action.unlockTime)}`;
+    case ActionType.Swap:
+      return `swap ${formatUsdc(action.fixedAmount)} ${tokenSymbol(action.tokenIn)} to ${tokenSymbol(action.tokenOut)} (min ${formatUsdc(action.minAmountOut)}), paid to ${shortAddress(action.recipients[0] ?? "0x0")}`;
     default:
       return "do an unknown action";
   }
@@ -106,6 +116,8 @@ export function actionTypeLabel(kind: ActionType): string {
       return "Sweep";
     case ActionType.LockRelease:
       return "Lock/Release";
+    case ActionType.Swap:
+      return "Swap";
     default:
       return "Unknown";
   }

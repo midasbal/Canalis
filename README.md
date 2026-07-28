@@ -12,15 +12,17 @@ money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 
 > Status: a real subset of the MVP is deployed and proven end-to-end on Arc
 > testnet — all four triggers (Manual, OnSchedule, OnThreshold, OnReceive)
-> and all four actions (Forward, Split, Sweep, LockRelease) work against a
-> user's own on-chain account, gated by real condition guards (balance
-> floor, time window, cooldown, allow/deny recipients, amount cap), a real
-> off-chain keeper autonomously drives the caller-agnostic triggers, and
-> flows can be paused/cancelled, dry-run previewed, and enumerated
-> per-owner — the contract-side building blocks the upcoming builder UI
-> needs. Everything else (the visual builder canvas itself, most of the
-> dashboard, Circle Wallet/Paymaster) is still stubbed. See
-> [Status](#status) for the exact, honest breakdown.
+> and all five actions (Forward, Split, Sweep, LockRelease, **Swap**) work
+> against a user's own on-chain account, gated by real condition guards
+> (balance floor, time window, cooldown, allow/deny recipients, amount
+> cap), a real off-chain keeper autonomously drives the caller-agnostic
+> triggers, flows can be paused/cancelled, dry-run previewed, and
+> enumerated per-owner, and a real visual builder UI is live. Swap is
+> Canalis's first Arc-native feature slice: it routes through a
+> **self-built constant-product AMM (`CanalisSwapPool`, USDC/EURC)** rather
+> than a third-party DEX — see [Status](#status) for why. Everything else
+> (Circle Wallet/Paymaster, the remaining Arc-native slices) is still
+> stubbed. See [Status](#status) for the exact, honest breakdown.
 
 ---
 
@@ -85,7 +87,7 @@ Canalis does **not** deploy a new contract per flow. There is one generic
 ```
   Off-chain                      On-chain (Arc testnet)
  ┌────────────────┐             ┌───────────────────┐        ┌─────────────────┐
- │ Keeper (planned)│──pokes───▶ │  CanalisExecutor    │──moves──▶│  CanalisAccount  │
+ │ Keeper (real)   │──pokes───▶ │  CanalisExecutor    │──moves──▶│  CanalisAccount  │
  │ polls schedule/ │             │  (flows as data,    │  USDC   │  (per-user USDC  │
  │ threshold flows │             │   one shared        │         │  vault, one per  │
  └────────────────┘             │   contract)         │         │  owner via       │
@@ -108,11 +110,10 @@ Canalis does **not** deploy a new contract per flow. There is one generic
   no manual per-user deployment. The flow-registration/execution
   authorization model resolves the human owner via
   `CanalisAccount(flow.owner).owner()` (OpenZeppelin `Ownable`).
-- **Keeper (planned, not built)** — for `OnSchedule`/`OnThreshold` triggers,
-  an off-chain poller pokes the executor, which **re-verifies the condition
-  on-chain** before acting, so the keeper can never fire a flow falsely.
-  `OnReceive` is meant to be event-driven from the account instead of
-  keeper-polled.
+- **Keeper** (`keeper/`, real, see [Status](#status)) — for
+  `OnSchedule`/`OnThreshold`/`OnReceive` triggers, an off-chain poller
+  pokes the executor, which **re-verifies the condition on-chain** before
+  acting, so the keeper can never fire a flow falsely.
 
 ## The flow model
 
@@ -123,22 +124,22 @@ conditions, etc. are extended/future scope, tracked privately).
 
 **Triggers:** `OnReceive` · `OnSchedule` · `OnThreshold` · `Manual`
 
-**Actions:** `Split` · `Forward` · `Sweep` · `LockRelease`
+**Actions:** `Split` · `Forward` · `Sweep` · `LockRelease` · `Swap`
 
 **Condition guard fields:** amount cap (min/max), cooldown, time window,
 minimum balance, allow/deny recipient lists.
 
-All of the above exist as on-chain data types. **`Manual` (trigger),
-`Forward`/`Split`/`Sweep` (actions), and every Condition guard field
-execute real logic today** — proven on Arc testnet, moving real USDC and
-genuinely blocking flows that violate a guard. Conditions on a flow are
-evaluated as a logical AND (every field on every `Condition` entry must
-hold) after trigger validation and before any action runs; the first
-unmet field reverts with a specific reason (e.g. `"CanalisExecutor:
-amount exceeds cap"`), never a silent skip. Everything else — the other
-three trigger types and `LockRelease` — is an explicit, tested
-`revert("... not yet implemented")`, never a silent no-op. See
-[Status](#status) for the precise breakdown.
+All triggers, all actions, and every condition guard field execute real
+logic today — proven on Arc testnet, moving real USDC (and, for `Swap`,
+real EURC) and genuinely blocking flows that violate a guard. Conditions
+on a flow are evaluated as a logical AND (every field on every
+`Condition` entry must hold) after trigger validation and before any
+action runs; the first unmet field reverts with a specific reason (e.g.
+`"CanalisExecutor: amount exceeds cap"`), never a silent skip. `Swap`
+routes through `CanalisSwapPool`, a self-built constant-product AMM (see
+[Status](#status)) — the account-vs-recipient design decision there is
+that the swapped-out token pays out to a recipient address named in the
+action, not back into the (USDC-only) `CanalisAccount`.
 
 ## Repo layout
 
@@ -148,9 +149,10 @@ canalis/
 │   ├── src/
 │   │   ├── libraries/FlowTypes.sol         # trigger/action enums, Condition/Action/Flow structs
 │   │   ├── interfaces/ICanalisExecutor.sol
-│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 4 actions, pause, preview, enumeration)
+│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 5 actions, pause, preview, enumeration)
 │   │   ├── CanalisAccount.sol              # per-user USDC vault + onlyExecutor trust boundary + depositNonce
-│   │   └── CanalisAccountFactory.sol       # one CanalisAccount per owner, self-service
+│   │   ├── CanalisAccountFactory.sol       # one CanalisAccount per owner, self-service
+│   │   └── CanalisSwapPool.sol             # self-built constant-product USDC/EURC AMM (Arc-native feature #1)
 │   ├── test/
 │   │   ├── CanalisExecutor.t.sol           # registerFlow/executeFlow, Forward/Split/Sweep, fuzz
 │   │   ├── CanalisExecutorConditions.t.sol # all 5 Condition guard fields, multi-condition, fuzz
@@ -160,14 +162,18 @@ canalis/
 │   │   ├── CanalisExecutorEvents.t.sol     # ActionExecuted recipient/amount per action type, incl. Split legs
 │   │   ├── CanalisExecutorPreview.t.sol    # previewFlow vs. real executeFlow, every trigger type + conditions
 │   │   ├── CanalisExecutorEnumeration.t.sol # flowsOf per-owner, in order, doesn't mix owners
+│   │   ├── CanalisExecutorSwap.t.sol       # Swap action: delivery, slippage, conditions/pause gating, previewFlow, fuzz
+│   │   ├── CanalisSwapPool.t.sol           # x*y=k correctness, fee, minAmountOut, reserve accounting, fuzz
 │   │   ├── CanalisAccount.t.sol            # executorTransfer trust boundary, fuzz
 │   │   ├── CanalisAccountFactory.t.sol     # one-account-per-owner
-│   │   └── mocks/MockERC20.sol             # 6-decimal mock USDC for tests
+│   │   └── mocks/MockERC20.sol             # 6-decimal mock USDC/EURC for tests
 │   ├── script/
-│   │   ├── Deploy.s.sol                    # deploys Executor + Factory + deployer's account
+│   │   ├── Deploy.s.sol                    # deploys SwapPool + Executor + Factory + deployer's account
+│   │   ├── seed-swap-pool.sh               # owner-seeds CanalisSwapPool with USDC/EURC liquidity
 │   │   ├── prove-forward-flow.sh           # live-testnet proof: Forward (cast-based, see gotcha above)
 │   │   ├── prove-split-flow.sh             # live-testnet proof: Split
 │   │   ├── prove-sweep-flow.sh             # live-testnet proof: Sweep
+│   │   ├── prove-swap-flow.sh              # live-testnet proof: Swap (quote-matching output, reserve deltas)
 │   │   ├── prove-amount-cap-condition.sh   # live-testnet proof: amount-cap condition (block + allow)
 │   │   ├── prove-cooldown-condition.sh     # live-testnet proof: cooldown condition (block + allow)
 │   │   ├── prove-onschedule-trigger.sh     # live-testnet proof: OnSchedule (due, catch-up, non-owner keeper caller)
@@ -180,24 +186,28 @@ canalis/
 │   └── .env.example                        # RPC_URL / PRIVATE_KEY placeholders
 ├── keeper/                         # standalone Node/TS + viem keeper service
 │   ├── src/
-│   │   ├── index.ts                        # poll loop: discover flows, poke executeFlow, tolerate reverts
+│   │   ├── index.ts                        # poll loop: flowsOf + previewFlow (getLogs-free), poke executeFlow, tolerate reverts
 │   │   ├── abi.ts / chain.ts / config.ts    # minimal executor ABI, Arc testnet chain def, env config
-│   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / KEEPER_PRIVATE_KEY / POLL_INTERVAL_MS
+│   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / CANALIS_ACCOUNT / KEEPER_PRIVATE_KEY / POLL_INTERVAL_MS
 └── web/                            # Vite + React + TS frontend
     ├── src/
-    │   ├── chains.ts / wagmi.ts             # Arc testnet chain + wagmi config
+    │   ├── chains.ts / wagmi.ts             # Arc testnet chain + rate-limit-aware wagmi transport
     │   ├── lib/
     │   │   ├── flows.ts                     # TS mirror of the Solidity flow model + encode/decode
-    │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above
+    │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above (incl. CanalisSwapPool)
+    │   │   ├── composer.ts                  # composer draft state -> Flow, validation
+    │   │   ├── flowSummary.ts               # plain-English flow/action summaries
     │   │   ├── contracts.ts                 # deployed-address env lookup
     │   │   └── useCanalisAccount.ts         # resolves the connected wallet's CanalisAccount
     │   ├── components/
     │   │   ├── Header.tsx                   # wordmark + tab nav + wallet connect
     │   │   ├── WalletConnect.tsx             # injected-wallet connect/disconnect
-    │   │   ├── BuilderCanvas.tsx             # trigger/condition/action block palette (static)
-    │   │   ├── DeployForwardFlow.tsx         # the one real Builder path: create account, deploy+run a Forward flow
-    │   │   ├── Dashboard.tsx                 # account/balance (live) + flows/run-log (placeholder) cards
-    │   │   └── ui/                          # Card, Badge, EmptyState, FlowBlock, etc.
+    │   │   ├── BuilderCanvas.tsx             # hosts the flow composer
+    │   │   ├── composer/                    # stepper composer: trigger/conditions/actions sections, templates
+    │   │   ├── DeployedFlows.tsx / FlowRow.tsx # deployed-flows list, pause/run-now, live previewFlow status
+    │   │   ├── RunLog.tsx                   # FlowExecuted/ActionExecuted history, "ran automatically" detection
+    │   │   ├── Dashboard.tsx                # account/balance + deployed flows + run log
+    │   │   └── ui/                          # Card, Badge, EmptyState, etc.
     │   └── index.css                       # Tailwind v4 theme (dark, "channel" palette)
     └── .env.example                         # RPC override + deployed-contract address placeholders
 ```
@@ -242,7 +252,7 @@ canalis/
   **`Split`** (distribute a total across N recipients by basis points,
   remainder stays in the account), **`Sweep`** (move everything above a
   threshold to one destination; an honest no-op — no fake transfer — when
-  balance is at or below the threshold), and **`LockRelease`** (a
+  balance is at or below the threshold), **`LockRelease`** (a
   two-phase action per flow/action slot: the first `executeFlow` call
   locks `fixedAmount` out of the `CanalisAccount` into the **executor's
   own custody** — not a separate ledger inside the account, so locked
@@ -250,8 +260,15 @@ canalis/
   `CanalisAccount.balance()` — a call before `unlockTime` reverts "still
   locked", and the first call at/after `unlockTime` releases to the
   recipient and permanently marks that slot released, so double-release
-  is impossible by construction, not just guarded). All four proven with
-  real transactions on Arc testnet (see `contracts/script/prove-*.sh`).
+  is impossible by construction, not just guarded), and **`Swap`**
+  (Canalis's first Arc-native feature — swaps `tokenIn` for `tokenOut` via
+  `CanalisSwapPool`, a **self-built** constant-product USDC/EURC AMM
+  rather than a third-party DEX; pulls `amountIn` from the account,
+  delivers the output directly to a recipient address named in the
+  action — `CanalisAccount` stays USDC-only, it doesn't custody the
+  swapped-out token — and enforces `minAmountOut` slippage protection at
+  the pool level). All five proven with real transactions on Arc testnet
+  (see `contracts/script/prove-*.sh`).
 - Conditions (all 5 guard fields): **balance floor** (`minBalance`),
   **time window** (`windowStart`/`windowEnd`, each independently
   open-ended), **cooldown** (`cooldownSeconds`, measured from
@@ -268,14 +285,20 @@ canalis/
   `prove-cooldown-condition.sh`) — a flow that violates the guard is
   blocked with the exact revert reason, the same flow within the guard
   succeeds and moves USDC.
-- A real off-chain **keeper** (`keeper/`, Node/TS + viem) that indexes
-  `FlowRegistered` events across all owners, re-reads each flow's live
-  state, and pokes `executeFlow` for anything due/eligible — skipping
-  `Manual` flows entirely, since those stay owner-only. Proven live on
-  Arc testnet driving a short-interval `OnSchedule` flow to fire with no
-  human interaction; see `keeper/README.md` for how to run it and the
-  trust model (a hot key that only ever calls `executeFlow`; the contract,
-  not the caller, is what's trusted).
+- A real off-chain **keeper** (`keeper/`, Node/TS + viem) — **entirely
+  `getLogs`-free**: discovers a configured `CanalisAccount`'s flows via
+  `flowsOf` (one `eth_call`), dry-runs each via `previewFlow`, and pokes
+  `executeFlow` only when `canRun` — every step a plain `eth_call`, so it
+  never hits free-tier RPC `getLogs` range caps (an earlier version
+  indexed `FlowRegistered` via `getLogs` and was replaced for exactly this
+  reason). Skips `Manual` flows entirely — `previewFlow`'s owner-only
+  check naturally reports `canRun=false` for the keeper, since it's never
+  the account owner. Proven live on Arc testnet driving a short-interval
+  `OnSchedule` flow to fire with no human interaction; see
+  `keeper/README.md` for how to run it and the trust model (a hot key
+  that only ever calls `executeFlow`; the contract, not the caller, is
+  what's trusted). Services one configured account — multi-account
+  enumeration is future work.
 - **Pause/cancel** — `setFlowActive(flowId, active)`, owner-only (same
   auth model as Manual's `executeFlow`), emits `FlowActiveSet`. Blocks
   execution for every trigger type identically — a paused flow's
@@ -300,34 +323,39 @@ canalis/
   everywhere else), resolving the earlier "no on-chain per-owner
   enumeration" gap. Proven live on Arc testnet
   (`contracts/script/prove-flowsof.sh`).
-- Foundry test suite: **129 passing tests** (13 fuzz tests, 256 runs each)
+- **`CanalisSwapPool`** — a self-built constant-product (x*y=k) AMM for a
+  single USDC/EURC pair, 0.30% fee, explicit reserve accounting (never
+  trusts raw `balanceOf`, closing off the donation-attack class),
+  owner-seeded liquidity (no LP tokens — a demo instrument, not a public
+  market). `swap()` enforces `minAmountOut`; `quote()` mirrors its exact
+  math for callers/UIs to compute a sane minimum before sending a real
+  transaction. Proven live on Arc testnet: swap output matches the pool's
+  own quote exactly, reserves move by exactly the swap amounts
+  (`contracts/script/prove-swap-flow.sh`).
+- Foundry test suite: **168 passing tests** (17 fuzz tests, 256 runs each)
   across `CanalisExecutor`, its condition guards, its triggers, its
-  LockRelease action, pause, enriched events, preview, per-owner
-  enumeration, `CanalisAccount`, and `CanalisAccountFactory`.
-- Frontend: wagmi/viem configured for Arc testnet (chainId `5042002`),
-  injected-wallet connect/disconnect, live `CanalisAccount.balance` read on
-  the Dashboard, and one real end-to-end Builder path
-  (`DeployForwardFlow.tsx`: create account → compose a Manual+Forward flow
-  → `registerFlow` → `executeFlow`, all against the deployed contracts).
-  **Not extended this slice or the engine-for-UI addendum** — no
-  trigger/keeper/pause/preview UI was added; everything above is proven
-  via `cast`/tests/the keeper service itself, not the frontend. The
-  addendum exists specifically so the next slice can build the visual
-  builder against a frozen, UI-ready engine.
+  LockRelease and Swap actions, pause, enriched events, preview,
+  per-owner enumeration, `CanalisSwapPool`, `CanalisAccount`, and
+  `CanalisAccountFactory`.
+- Frontend: a real visual flow **composer** (stepper: trigger → conditions
+  → actions, including a Swap block with a live pool-quote-driven
+  slippage control), a **deployed-flows list** with pause/resume and
+  run-now (both real transactions, guarded against double-submit, with
+  decoded on-chain revert reasons), live `previewFlow`-backed status per
+  flow, and a **run log** built from real `FlowExecuted`/`ActionExecuted`
+  events — including an honest "ran automatically" detection (compares
+  each event's real `triggeredBy` against the connected wallet — an
+  on-chain fact, not a guess). Reads go through a throttled/retrying RPC
+  transport with a keyed-endpoint override, since the public Arc RPC (and
+  most free-tier keyed ones) cap `eth_getLogs` hard.
 
 ### Stubbed (explicit reverts / honest "Coming soon" UI — never faked)
 
-- Flow builder drag-and-drop composition — `BuilderCanvas.tsx`'s palette is
-  static; the "Deploy from canvas" button is disabled by design. Only the
-  Forward-flow form (`DeployForwardFlow.tsx`) is wired to
-  `registerFlow`/`executeFlow` today — Split/Sweep and every Condition
-  guard are real in the contract but not yet exposed as Builder UI (the
-  deploy form always registers a zero-condition flow).
-- Dashboard "Deployed flows" and "Run log" cards — placeholder `EmptyState`,
-  zero event indexing behind them. Balance is the only live read.
 - Circle Wallet onboarding and Gas Station/Paymaster sponsorship — no
   Circle SDK integration; wagmi uses a plain injected connector.
-- 2–3 demo templates (income-splitter, savings-sweep, scheduled payout).
+- The remaining Arc-native feature slices (oracle price condition, CCTP
+  action, treasury-rebalance and DCA composite templates) — see
+  `docs/canalis-spec.md` §7.3.
 
 ## Getting started
 
@@ -350,11 +378,13 @@ and `PRIVATE_KEY` (never commit real secrets), then:
 forge script script/Deploy.s.sol:Deploy --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
 ```
 
-This deploys `CanalisExecutor` + `CanalisAccountFactory` and creates the
-deployer's own `CanalisAccount` in the same run. **Note:** this works fine
-via `forge script` because deployment never touches USDC. Any subsequent
-script that deposits/forwards/splits/sweeps USDC needs the `cast send`
-pattern instead — see the Arc-specific gotcha above and
+This deploys `CanalisSwapPool` + `CanalisExecutor` + `CanalisAccountFactory`
+and creates the deployer's own `CanalisAccount` in the same run (the pool
+starts empty — seed it with `./script/seed-swap-pool.sh <POOL>
+<USDC_AMOUNT_6DP> <EURC_AMOUNT_6DP>`). **Note:** deployment itself works
+fine via `forge script` because it never touches USDC. Any subsequent
+script that deposits/forwards/splits/sweeps/swaps USDC needs the `cast
+send` pattern instead — see the Arc-specific gotcha above and
 `contracts/script/prove-*.sh` for working examples.
 
 - Arc testnet chainId: `5042002`
@@ -362,6 +392,7 @@ pattern instead — see the Arc-specific gotcha above and
 - Explorer: `https://testnet.arcscan.app`
 - Faucet: `https://faucet.circle.com` (20 USDC / 2h per address; also EURC, cirBTC)
 - USDC ERC-20 interface (system contract): `0x3600000000000000000000000000000000000000` (6 decimals — do not confuse with the 18-decimal native gas token)
+- EURC ERC-20 interface: `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` (6 decimals)
 
 ### Web
 
@@ -372,8 +403,10 @@ npm run dev
 ```
 
 Copy `web/.env.example` to `.env` and fill in the deployed
-`VITE_CANALIS_EXECUTOR_ADDRESS` / `VITE_CANALIS_ACCOUNT_FACTORY_ADDRESS` to
-point the frontend at your deployment.
+`VITE_CANALIS_EXECUTOR_ADDRESS` / `VITE_CANALIS_ACCOUNT_FACTORY_ADDRESS` /
+`VITE_CANALIS_SWAP_POOL_ADDRESS` to point the frontend at your deployment
+(see `web/.env.example` for the full list, including the RPC/`getLogs`
+tuning vars).
 
 ## Roadmap
 

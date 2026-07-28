@@ -26,7 +26,7 @@ contract CanalisExecutorPauseTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor();
+        executor = new CanalisExecutor(makeAddr("swapPool"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -55,7 +55,10 @@ contract CanalisExecutorPauseTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 100_000,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
     }

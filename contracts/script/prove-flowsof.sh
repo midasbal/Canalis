@@ -32,8 +32,8 @@ echo "flowsOf($ACCOUNT) BEFORE: $BEFORE"
 echo
 echo "--- registerFlow x2 (Manual + Forward, zero conditions) ---"
 TX1=$(cast send "$EXECUTOR" \
-  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))" \
-  "($ACCOUNT,(3,0,0,0,false),[],[(1,[$RECIPIENT],[],1,0,0)],true,0)" \
+  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))" \
+  "($ACCOUNT,(3,0,0,0,false),[],[(1,[$RECIPIENT],[],1,0,0,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 FLOW_1=$(cast receipt "$TX1" --rpc-url "$RPC_URL" --json | python3 -c "
 import json, sys
@@ -47,8 +47,8 @@ for log in r['logs']:
 echo "registerFlow #1: $EXPLORER/$TX1 -> flowId $FLOW_1"
 
 TX2=$(cast send "$EXECUTOR" \
-  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))" \
-  "($ACCOUNT,(3,0,0,0,false),[],[(1,[$RECIPIENT],[],1,0,0)],true,0)" \
+  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))" \
+  "($ACCOUNT,(3,0,0,0,false),[],[(1,[$RECIPIENT],[],1,0,0,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 FLOW_2=$(cast receipt "$TX2" --rpc-url "$RPC_URL" --json | python3 -c "
 import json, sys

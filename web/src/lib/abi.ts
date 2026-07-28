@@ -159,6 +159,34 @@ export const erc20Abi = [
   },
 ] as const;
 
+/** CanalisSwapPool — just what the composer needs for a live quote + reserve display. */
+export const canalisSwapPoolAbi = [
+  {
+    type: "function",
+    name: "quote",
+    stateMutability: "view",
+    inputs: [
+      { name: "tokenIn", type: "address" },
+      { name: "amountIn", type: "uint256" },
+    ],
+    outputs: [{ name: "amountOut", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "reserveUsdc",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "reserveEurc",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
 export const canalisAccountFactoryAbi = [
   {
     type: "function",

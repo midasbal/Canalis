@@ -56,12 +56,12 @@ TX2=$(cast send "$ACCOUNT" "deposit(uint256)" "$DEPOSIT_AMOUNT" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 echo "deposit:      $EXPLORER/$TX2"
 
-REGISTER_SIG="registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))"
+REGISTER_SIG="registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))"
 
 register_flow() {
   local amount="$1"
   cast send "$EXECUTOR" "$REGISTER_SIG" \
-    "($ACCOUNT,(3,0,0,0,false),[(0,$MAX_AMOUNT,0,0,0,0,[],[])],[(1,[$RECIPIENT],[],$amount,0,0)],true,0)" \
+    "($ACCOUNT,(3,0,0,0,false),[(0,$MAX_AMOUNT,0,0,0,0,[],[])],[(1,[$RECIPIENT],[],$amount,0,0,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
     --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])"
 }
 

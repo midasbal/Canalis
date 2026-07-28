@@ -1,8 +1,27 @@
+import { useEffect } from "react";
+import { useReadContract } from "wagmi";
+import { formatUnits, parseUnits } from "viem";
 import { ActionType } from "../../lib/flows";
-import { ACTION_KIND_LABELS, emptyAction, newSplitRecipientRow, type ComposerAction } from "../../lib/composer";
+import {
+  ACTION_KIND_LABELS,
+  emptyAction,
+  newSplitRecipientRow,
+  swapTokenAddresses,
+  type ComposerAction,
+  type SwapTokenSymbol,
+} from "../../lib/composer";
+import { canalisSwapPoolAbi } from "../../lib/abi";
+import { CANALIS_SWAP_POOL_ADDRESS } from "../../lib/contracts";
+import { USDC_DECIMALS } from "../../lib/format";
 import { AddressField, AmountField, Field, RemoveButton } from "./inputs";
 
-const ACTION_KINDS: ActionType[] = [ActionType.Forward, ActionType.Split, ActionType.Sweep, ActionType.LockRelease];
+const ACTION_KINDS: ActionType[] = [
+  ActionType.Forward,
+  ActionType.Split,
+  ActionType.Sweep,
+  ActionType.LockRelease,
+  ActionType.Swap,
+];
 
 interface ActionsSectionProps {
   actions: ComposerAction[];
@@ -109,6 +128,104 @@ function ActionCard({
           />
         </div>
       )}
+
+      {action.kind === ActionType.Swap && <SwapEditor action={action} onChange={onChange} />}
+    </div>
+  );
+}
+
+/**
+ * Swap via CanalisSwapPool (our own USDC/EURC AMM — see
+ * CanalisExecutor.sol's Arc-native-feature docs). Reads a live `quote()`
+ * from the pool as the amount/direction change and auto-derives
+ * `swapMinAmountOut` from that quote + the slippage tolerance — the
+ * composer never lets a Swap deploy with an unset (zero) minAmountOut,
+ * since that's real, functioning slippage protection thrown away, not a
+ * sane default.
+ */
+function SwapEditor({ action, onChange }: { action: ComposerAction; onChange: (patch: Partial<ComposerAction>) => void }) {
+  const [tokenIn] = swapTokenAddresses(action.swapTokenIn);
+  const tokenOutSymbol: SwapTokenSymbol = action.swapTokenIn === "USDC" ? "EURC" : "USDC";
+
+  let parsedAmountIn: bigint | undefined;
+  try {
+    parsedAmountIn = action.swapAmountIn.trim() ? parseUnits(action.swapAmountIn.trim(), USDC_DECIMALS) : undefined;
+  } catch {
+    parsedAmountIn = undefined;
+  }
+
+  const quoteQuery = useReadContract({
+    address: CANALIS_SWAP_POOL_ADDRESS,
+    abi: canalisSwapPoolAbi,
+    functionName: "quote",
+    args: tokenIn && parsedAmountIn ? [tokenIn, parsedAmountIn] : undefined,
+    query: { enabled: Boolean(CANALIS_SWAP_POOL_ADDRESS && tokenIn && parsedAmountIn && parsedAmountIn > 0n) },
+  });
+
+  const quote = quoteQuery.data;
+  const slippageBps = Number(action.swapSlippageBps || "0");
+
+  useEffect(() => {
+    if (quote === undefined || !Number.isFinite(slippageBps)) return;
+    const minOut = (quote * BigInt(Math.max(0, 10_000 - slippageBps))) / 10_000n;
+    onChange({ swapMinAmountOut: formatUnits(minOut, USDC_DECIMALS) });
+    // Only re-derive when the live quote or the slippage tolerance itself
+    // changes — `onChange` is a fresh closure every render and isn't part
+    // of what should re-trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote, slippageBps]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          <span className="mb-1 block text-ink-muted">Direction</span>
+          <select
+            value={action.swapTokenIn}
+            onChange={(e) => onChange({ swapTokenIn: e.target.value as SwapTokenSymbol })}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink"
+          >
+            <option value="USDC">USDC to EURC</option>
+            <option value="EURC">EURC to USDC</option>
+          </select>
+        </label>
+        <AmountField
+          label={`Amount to swap (${action.swapTokenIn})`}
+          value={action.swapAmountIn}
+          onChange={(e) => onChange({ swapAmountIn: e.target.value })}
+        />
+      </div>
+
+      <AddressField
+        label="Recipient (receives the swapped-out token)"
+        value={action.swapRecipient}
+        onChange={(e) => onChange({ swapRecipient: e.target.value })}
+      />
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field
+          label="Slippage tolerance (bps, e.g. 100 = 1%)"
+          value={action.swapSlippageBps}
+          onChange={(e) => onChange({ swapSlippageBps: e.target.value })}
+          placeholder="100"
+          inputMode="numeric"
+        />
+        <AmountField
+          label={`Minimum received (${tokenOutSymbol}) — sent on-chain`}
+          value={action.swapMinAmountOut}
+          onChange={(e) => onChange({ swapMinAmountOut: e.target.value })}
+        />
+      </div>
+
+      <p className="text-xs text-ink-faint">
+        {!CANALIS_SWAP_POOL_ADDRESS
+          ? "Pool not configured (VITE_CANALIS_SWAP_POOL_ADDRESS) — enter a minimum received manually."
+          : quoteQuery.isLoading
+            ? "Fetching live pool quote…"
+            : quote !== undefined
+              ? `Live quote: ${formatUnits(quote, USDC_DECIMALS)} ${tokenOutSymbol} right now — minimum received above is auto-computed from this and your slippage tolerance (you can still edit it directly).`
+              : "Enter an amount to see a live pool quote."}
+      </p>
     </div>
   );
 }

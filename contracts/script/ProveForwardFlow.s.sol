@@ -81,7 +81,10 @@ contract ProveForwardFlow is Script {
             amountsOrBps: new uint256[](0),
             fixedAmount: FORWARD_AMOUNT,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
 

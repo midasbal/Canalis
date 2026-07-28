@@ -25,7 +25,7 @@ contract CanalisExecutorConditionsTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor();
+        executor = new CanalisExecutor(makeAddr("swapPool"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -75,7 +75,10 @@ contract CanalisExecutorConditionsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: amount,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
     }
@@ -466,7 +469,10 @@ contract CanalisExecutorConditionsTest is Test {
             amountsOrBps: bps,
             fixedAmount: 1_000_000, // split total exceeds the 500,000 cap
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
 
@@ -502,7 +508,10 @@ contract CanalisExecutorConditionsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 0,
             sweepThreshold: 400_000,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
 

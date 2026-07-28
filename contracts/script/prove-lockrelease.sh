@@ -46,8 +46,8 @@ echo "Chain timestamp now: $NOW, unlockTime: $UNLOCK_AT"
 
 echo "--- registerFlow (Manual trigger, LockRelease action, unlockTime=$UNLOCK_AT) ---"
 TX2=$(cast send "$EXECUTOR" \
-  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))" \
-  "($ACCOUNT,(3,0,0,0,false),[],[(3,[$RECIPIENT],[],$LOCK_AMOUNT,0,$UNLOCK_AT)],true,0)" \
+  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))" \
+  "($ACCOUNT,(3,0,0,0,false),[],[(3,[$RECIPIENT],[],$LOCK_AMOUNT,0,$UNLOCK_AT,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 echo "registerFlow: $EXPLORER/$TX2"
 

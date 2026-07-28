@@ -19,7 +19,8 @@ library FlowTypes {
         Split, // distribute to N recipients by basis points or fixed amounts
         Forward, // send the full/partial amount to a single recipient
         Sweep, // move balance above a threshold to a savings sub-account
-        LockRelease // time-lock an amount, released after `unlockTime`
+        LockRelease, // time-lock an amount, released after `unlockTime`
+        Swap // swap tokenIn -> tokenOut via CanalisExecutor's configured CanalisSwapPool
     }
 
     /// @notice A single trigger definition attached to a flow.
@@ -48,11 +49,14 @@ library FlowTypes {
     /// unused fields are ignored by the handler for that type.
     struct Action {
         ActionType kind;
-        address[] recipients; // Split: N destinations; Forward/Sweep: recipients[0] is the one destination
+        address[] recipients; // Split: N destinations; Forward/Sweep/Swap: recipients[0] is the one destination
         uint256[] amountsOrBps; // Split: per-recipient basis points (0-10000 each, sum <= 10000) of `fixedAmount`
-        uint256 fixedAmount; // Forward: flat amount to send; Split: total amount being distributed
+        uint256 fixedAmount; // Forward: flat amount to send; Split: total amount being distributed; Swap: amountIn
         uint256 sweepThreshold; // Sweep: leave this much behind, sweep the rest to recipients[0]
         uint256 unlockTime; // LockRelease: unix timestamp funds become releasable
+        address tokenIn; // Swap: token sold from the account (must be the pool's USDC or EURC)
+        address tokenOut; // Swap: token bought and delivered to recipients[0] (the pool's other token)
+        uint256 minAmountOut; // Swap: slippage floor — CanalisSwapPool.swap reverts "insufficient output" below this
     }
 
     /// @notice A complete flow: one trigger, any number of conditions/actions.

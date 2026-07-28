@@ -27,7 +27,7 @@ contract CanalisExecutorEventsTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor();
+        executor = new CanalisExecutor(makeAddr("swapPool"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -81,7 +81,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 400_000,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);
@@ -114,7 +117,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: bps,
             fixedAmount: 1_000_000,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);
@@ -162,7 +168,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: bps,
             fixedAmount: 1_000_000,
             sweepThreshold: 0,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);
@@ -198,7 +207,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 0,
             sweepThreshold: 200_000,
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);
@@ -223,7 +235,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 0,
             sweepThreshold: 200_000, // above current balance -> no-op
-            unlockTime: 0
+            unlockTime: 0,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);
@@ -254,7 +269,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 400_000,
             sweepThreshold: 0,
-            unlockTime: block.timestamp + 1000
+            unlockTime: block.timestamp + 1000,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);
@@ -280,7 +298,10 @@ contract CanalisExecutorEventsTest is Test {
             amountsOrBps: new uint256[](0),
             fixedAmount: 400_000,
             sweepThreshold: 0,
-            unlockTime: unlockAt
+            unlockTime: unlockAt,
+            tokenIn: address(0),
+            tokenOut: address(0),
+            minAmountOut: 0
         });
         flow.actions = actions;
         uint256 flowId = _register(flow);

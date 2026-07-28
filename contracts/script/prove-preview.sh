@@ -45,8 +45,8 @@ NOW=$(cast block latest --rpc-url "$RPC_URL" --field timestamp)
 echo
 echo "=== FLOW A: OnSchedule, NOT yet due (scheduleAt = now + 3600) ==="
 TXA=$(cast send "$EXECUTOR" \
-  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))" \
-  "($ACCOUNT,(1,$((NOW + 3600)),0,0,false),[],[(1,[$RECIPIENT],[],$FORWARD_AMOUNT,0,0)],true,0)" \
+  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))" \
+  "($ACCOUNT,(1,$((NOW + 3600)),0,0,false),[],[(1,[$RECIPIENT],[],$FORWARD_AMOUNT,0,0,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 FLOW_A=$(cast receipt "$TXA" --rpc-url "$RPC_URL" --json | python3 -c "
 import json, sys
@@ -71,8 +71,8 @@ echo "$CALL_A"
 echo
 echo "=== FLOW B: OnSchedule, due now (scheduleAt = now) ==="
 TXB=$(cast send "$EXECUTOR" \
-  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))" \
-  "($ACCOUNT,(1,$NOW,0,0,false),[],[(1,[$RECIPIENT],[],$FORWARD_AMOUNT,0,0)],true,0)" \
+  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))" \
+  "($ACCOUNT,(1,$NOW,0,0,false),[],[(1,[$RECIPIENT],[],$FORWARD_AMOUNT,0,0,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 FLOW_B=$(cast receipt "$TXB" --rpc-url "$RPC_URL" --json | python3 -c "
 import json, sys

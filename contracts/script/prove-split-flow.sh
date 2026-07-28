@@ -56,8 +56,8 @@ echo "deposit:      $EXPLORER/$TX2"
 
 echo "--- registerFlow (Manual trigger, single Split action, 70/30) ---"
 TX3=$(cast send "$EXECUTOR" \
-  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256)[],bool,uint256))" \
-  "($ACCOUNT,(3,0,0,0,false),[],[(0,[$RECIPIENT_1,$RECIPIENT_2],[$BPS_1,$BPS_2],$DEPOSIT_AMOUNT,0,0)],true,0)" \
+  "registerFlow((address,(uint8,uint256,uint256,uint256,bool),(uint256,uint256,uint256,uint256,uint256,uint256,address[],address[])[],(uint8,address[],uint256[],uint256,uint256,uint256,address,address,uint256)[],bool,uint256))" \
+  "($ACCOUNT,(3,0,0,0,false),[],[(0,[$RECIPIENT_1,$RECIPIENT_2],[$BPS_1,$BPS_2],$DEPOSIT_AMOUNT,0,0,0x0000000000000000000000000000000000000000,0x0000000000000000000000000000000000000000,0)],true,0)" \
   --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['transactionHash'])")
 echo "registerFlow: $EXPLORER/$TX3"
 

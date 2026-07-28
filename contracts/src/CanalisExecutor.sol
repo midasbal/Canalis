@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {FlowTypes} from "./libraries/FlowTypes.sol";
 import {ICanalisExecutor} from "./interfaces/ICanalisExecutor.sol";
 import {CanalisAccount} from "./CanalisAccount.sol";
+import {CanalisSwapPool} from "./CanalisSwapPool.sol";
 
 /// @title CanalisExecutor
 /// @notice The single generic "money interpreter" for Canalis. Instead of
@@ -49,6 +50,21 @@ import {CanalisAccount} from "./CanalisAccount.sol";
 /// in the slice-4 keeper design. `ActionExecuted` now carries the real
 /// recipient/amount of each transfer (see each action handler's docs for
 /// the exact per-type semantics).
+///
+/// ARC-NATIVE FEATURE: Swap. Rather than routing through a third-party DEX
+/// (the spec's original plan), Canalis deploys and owns its own minimal
+/// constant-product AMM (`CanalisSwapPool`, USDC/EURC) — see that
+/// contract's docs for why. One pool is configured at construction
+/// (`swapPool`, immutable) and every Swap action routes through it.
+/// ACCOUNT-VS-RECIPIENT DESIGN DECISION: `CanalisAccount` is single-token
+/// (USDC-custodying) by design — see its own docs. Rather than generalizing
+/// it to hold arbitrary ERC20s (more powerful, more surface, more ways to
+/// strand funds) for this slice, `_handleSwap` delivers the swapped-out
+/// token directly to a recipient ADDRESS named in the action
+/// (`recipients[0]`), the same convention Forward/Sweep/LockRelease already
+/// use. "Swap and pay out" rather than "swap and hold" — simplest correct
+/// path that needs zero CanalisAccount changes; see `_handleSwap` for the
+/// exact custody path.
 contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -80,9 +96,20 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// specific action slot. See `_handleLockRelease`.
     mapping(uint256 => mapping(uint256 => LockState)) private _lockState;
 
+    /// @dev The single CanalisSwapPool every Swap action routes through
+    /// (see class docs "Arc-native feature: Swap"). One configured pool,
+    /// not a per-action pool address — simpler, and matches this slice's
+    /// single USDC/EURC pair.
+    CanalisSwapPool public immutable swapPool;
+
     modifier flowExists(uint256 flowId) {
         require(_flows[flowId].owner != address(0), "CanalisExecutor: unknown flow");
         _;
+    }
+
+    constructor(address swapPool_) {
+        require(swapPool_ != address(0), "CanalisExecutor: swapPool required");
+        swapPool = CanalisSwapPool(swapPool_);
     }
 
     /// @inheritdoc ICanalisExecutor
@@ -446,6 +473,10 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
                 if (_lockState[flowId][i] != LockState.Released) {
                     total += action.fixedAmount;
                 }
+            } else if (action.kind == FlowTypes.ActionType.Swap) {
+                // Counts the amountIn actually taken from the account, not
+                // the (variable, price-dependent) amountOut delivered.
+                total += action.fixedAmount;
             }
         }
     }
@@ -473,6 +504,8 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             _handleSweep(flowId, actionIndex, account, action);
         } else if (action.kind == FlowTypes.ActionType.LockRelease) {
             _handleLockRelease(flowId, actionIndex, account, action);
+        } else if (action.kind == FlowTypes.ActionType.Swap) {
+            _handleSwap(flowId, actionIndex, account, action);
         } else {
             revert("CanalisExecutor: unknown action type");
         }
@@ -616,5 +649,48 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         _lockState[flowId][actionIndex] = LockState.Released;
         IERC20(CanalisAccount(account).usdc()).safeTransfer(recipient, action.fixedAmount);
         emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.LockRelease, recipient, action.fixedAmount);
+    }
+
+    /// @dev Swaps `action.fixedAmount` of `action.tokenIn` for
+    /// `action.tokenOut` via `swapPool`, delivering the output directly to
+    /// `action.recipients[0]` (see class docs "ACCOUNT-VS-RECIPIENT DESIGN
+    /// DECISION" — CanalisAccount stays USDC-only; the swap pays out to an
+    /// address, it doesn't return funds into the account).
+    ///
+    /// Custody path: `account.executorTransfer` pulls `fixedAmount` of
+    /// `tokenIn` from the flow's CanalisAccount into THIS contract (the
+    /// executor), which then approves exactly that amount to `swapPool` and
+    /// calls `swap(tokenIn, fixedAmount, minAmountOut, recipient)` — the
+    /// pool pulls `tokenIn` from the executor and pays `tokenOut` straight
+    /// to `recipient` itself, so the executor never custodies the output
+    /// token at all (nothing to strand there). `minAmountOut` is enforced
+    /// by the pool itself (reverts "insufficient output" below it); this
+    /// handler adds no separate slippage check on top; it never allows an
+    /// unprotected minAmountOut of 0 to be silently "fine" — that's simply
+    /// the caller (flow author) choosing zero slippage protection, an
+    /// honest reflection of what they configured, not a hidden default.
+    function _handleSwap(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
+        internal
+    {
+        require(action.recipients.length >= 1, "CanalisExecutor: Swap requires a recipient");
+        address recipient = action.recipients[0];
+        require(recipient != address(0), "CanalisExecutor: Swap recipient cannot be zero address");
+        require(action.fixedAmount > 0, "CanalisExecutor: Swap amountIn must be positive");
+
+        address tokenIn = action.tokenIn;
+        address tokenOut = action.tokenOut;
+        address poolUsdc = address(swapPool.usdc());
+        address poolEurc = address(swapPool.eurc());
+        require(
+            (tokenIn == poolUsdc && tokenOut == poolEurc) || (tokenIn == poolEurc && tokenOut == poolUsdc),
+            "CanalisExecutor: Swap tokenIn/tokenOut must be the pool's USDC/EURC pair"
+        );
+
+        CanalisAccount(account).executorTransfer(address(this), action.fixedAmount);
+        IERC20(tokenIn).forceApprove(address(swapPool), action.fixedAmount);
+
+        uint256 amountOut = swapPool.swap(tokenIn, action.fixedAmount, action.minAmountOut, recipient);
+
+        emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.Swap, recipient, amountOut);
     }
 }

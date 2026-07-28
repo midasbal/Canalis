@@ -2,6 +2,9 @@ import { isAddress, parseUnits } from "viem";
 import type { Address } from "viem";
 import { ActionType, TriggerType, type Action, type Condition, type Flow } from "./flows";
 import { USDC_DECIMALS, datetimeLocalToUnixSeconds } from "./format";
+import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 
 /**
  * Draft (string-based, form-friendly) state for the flow composer, and its
@@ -104,7 +107,10 @@ export const ACTION_KIND_LABELS: Record<ActionType, string> = {
   [ActionType.Split]: "Split",
   [ActionType.Sweep]: "Sweep",
   [ActionType.LockRelease]: "Lock / release",
+  [ActionType.Swap]: "Swap",
 };
+
+export type SwapTokenSymbol = "USDC" | "EURC";
 
 export interface SplitRecipientRow {
   id: string;
@@ -128,6 +134,12 @@ export interface ComposerAction {
   lockRecipient: string;
   lockAmount: string;
   lockReleaseAt: string; // datetime-local
+  // Swap
+  swapTokenIn: SwapTokenSymbol;
+  swapAmountIn: string;
+  swapRecipient: string;
+  swapSlippageBps: string; // UI-only tolerance; the composer derives swapMinAmountOut from this + a live pool quote
+  swapMinAmountOut: string; // the actual on-chain slippage floor — kept in sync with slippageBps by the UI (see composer/SwapQuote.tsx), but this is the field that's actually sent
 }
 
 export function emptyAction(kind: ActionType): ComposerAction {
@@ -143,6 +155,11 @@ export function emptyAction(kind: ActionType): ComposerAction {
     lockRecipient: "",
     lockAmount: "",
     lockReleaseAt: "",
+    swapTokenIn: "USDC",
+    swapAmountIn: "",
+    swapRecipient: "",
+    swapSlippageBps: "100", // 1% default tolerance
+    swapMinAmountOut: "",
   };
 }
 
@@ -253,6 +270,9 @@ function actionToStruct(action: ComposerAction): Action {
     fixedAmount: 0n,
     sweepThreshold: 0n,
     unlockTime: 0n,
+    tokenIn: ZERO_ADDRESS,
+    tokenOut: ZERO_ADDRESS,
+    minAmountOut: 0n,
   };
 
   switch (action.kind) {
@@ -282,9 +302,25 @@ function actionToStruct(action: ComposerAction): Action {
         fixedAmount: parseUsdcSafe(action.lockAmount) ?? 0n,
         unlockTime: datetimeLocalToUnixSeconds(action.lockReleaseAt) ?? 0n,
       };
+    case ActionType.Swap: {
+      const [tokenIn, tokenOut] = swapTokenAddresses(action.swapTokenIn);
+      return {
+        ...base,
+        recipients: isAddress(action.swapRecipient.trim()) ? [action.swapRecipient.trim() as Address] : [],
+        fixedAmount: parseUsdcSafe(action.swapAmountIn) ?? 0n,
+        tokenIn: tokenIn ?? ZERO_ADDRESS,
+        tokenOut: tokenOut ?? ZERO_ADDRESS,
+        minAmountOut: parseUsdcSafe(action.swapMinAmountOut) ?? 0n,
+      };
+    }
     default:
       return base;
   }
+}
+
+/** [tokenIn, tokenOut] pool addresses for a composer swap direction. Either may be undefined if VITE_USDC_ADDRESS/VITE_EURC_ADDRESS aren't configured. */
+export function swapTokenAddresses(tokenIn: SwapTokenSymbol): [Address | undefined, Address | undefined] {
+  return tokenIn === "USDC" ? [CANALIS_USDC_ADDRESS, CANALIS_EURC_ADDRESS] : [CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS];
 }
 
 // ---------------------------------------------------------------------
@@ -386,6 +422,19 @@ export function validateComposerDraft(
       const amount = parseUsdcSafe(a.lockAmount);
       if (amount === null || amount <= 0n) errors.push(`${label}: amount must be greater than 0.`);
       if (datetimeLocalToUnixSeconds(a.lockReleaseAt) === null) errors.push(`${label}: pick a release date/time.`);
+    }
+    if (a.kind === ActionType.Swap) {
+      if (!isAddress(a.swapRecipient.trim())) errors.push(`${label}: recipient must be a valid 0x… address.`);
+      const amountIn = parseUsdcSafe(a.swapAmountIn);
+      if (amountIn === null || amountIn <= 0n) errors.push(`${label}: amount to swap must be greater than 0.`);
+      const [tokenIn, tokenOut] = swapTokenAddresses(a.swapTokenIn);
+      if (!tokenIn || !tokenOut) {
+        errors.push(`${label}: USDC/EURC pool addresses aren't configured (VITE_USDC_ADDRESS / VITE_EURC_ADDRESS).`);
+      }
+      const minAmountOut = parseUsdcSafe(a.swapMinAmountOut);
+      if (minAmountOut === null || minAmountOut <= 0n) {
+        errors.push(`${label}: minimum received must be a valid amount greater than 0 — real slippage protection, not zero.`);
+      }
     }
   }
 

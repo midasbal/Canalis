@@ -23,6 +23,7 @@ export const ActionType = {
   Forward: 1,
   Sweep: 2,
   LockRelease: 3,
+  Swap: 4,
 } as const;
 export type ActionType = (typeof ActionType)[keyof typeof ActionType];
 
@@ -57,9 +58,12 @@ export interface Action {
   kind: ActionType;
   recipients: Address[];
   amountsOrBps: bigint[];
-  fixedAmount: bigint;
+  fixedAmount: bigint; // Swap: amountIn
   sweepThreshold: bigint;
   unlockTime: bigint;
+  tokenIn: Address; // Swap: token sold from the account (the pool's USDC or EURC)
+  tokenOut: Address; // Swap: token bought and delivered to recipients[0]
+  minAmountOut: bigint; // Swap: slippage floor
 }
 
 export interface Flow {
@@ -117,6 +121,9 @@ export const flowAbiParameter = {
         { name: "fixedAmount", type: "uint256" },
         { name: "sweepThreshold", type: "uint256" },
         { name: "unlockTime", type: "uint256" },
+        { name: "tokenIn", type: "address" },
+        { name: "tokenOut", type: "address" },
+        { name: "minAmountOut", type: "uint256" },
       ],
     },
     { name: "active", type: "bool" },
