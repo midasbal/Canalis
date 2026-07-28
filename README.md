@@ -20,9 +20,12 @@ money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 > enumerated per-owner, and a real visual builder UI is live. Swap is
 > Canalis's first Arc-native feature slice: it routes through a
 > **self-built constant-product AMM (`CanalisSwapPool`, USDC/EURC)** rather
-> than a third-party DEX — see [Status](#status) for why. Everything else
-> (Circle Wallet/Paymaster, the remaining Arc-native slices) is still
-> stubbed. See [Status](#status) for the exact, honest breakdown.
+> than a third-party DEX — see [Status](#status) for why. A sixth condition
+> — an **oracle price condition** — is Canalis's second Arc-native feature
+> slice: it reads Pyth's real, live IPyth contract on Arc testnet (not a
+> mock), kept fresh by the off-chain keeper. Everything else (Circle
+> Wallet/Paymaster, the remaining Arc-native slices) is still stubbed. See
+> [Status](#status) for the exact, honest breakdown.
 
 ---
 
@@ -149,13 +152,15 @@ canalis/
 │   ├── src/
 │   │   ├── libraries/FlowTypes.sol         # trigger/action enums, Condition/Action/Flow structs
 │   │   ├── interfaces/ICanalisExecutor.sol
-│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 5 actions, pause, preview, enumeration)
+│   │   ├── interfaces/IPyth.sol            # minimal hand-written IPyth read/update interface (Arc-native feature #2)
+│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 5 actions, 6 conditions incl. oracle price, pause, preview, enumeration)
 │   │   ├── CanalisAccount.sol              # per-user USDC vault + onlyExecutor trust boundary + depositNonce
 │   │   ├── CanalisAccountFactory.sol       # one CanalisAccount per owner, self-service
 │   │   └── CanalisSwapPool.sol             # self-built constant-product USDC/EURC AMM (Arc-native feature #1)
 │   ├── test/
 │   │   ├── CanalisExecutor.t.sol           # registerFlow/executeFlow, Forward/Split/Sweep, fuzz
-│   │   ├── CanalisExecutorConditions.t.sol # all 5 Condition guard fields, multi-condition, fuzz
+│   │   ├── CanalisExecutorConditions.t.sol # 5 amount/time/recipient Condition guard fields, multi-condition, fuzz
+│   │   ├── CanalisExecutorOracleCondition.t.sol # oracle price condition vs. MockPyth: above/below, staleness, expo normalization, AND, preview parity
 │   │   ├── CanalisExecutorTriggers.t.sol   # OnSchedule/OnThreshold/OnReceive, catch-up, fuzz
 │   │   ├── CanalisExecutorLockRelease.t.sol # lock/release lifecycle, double-spend/double-release, fuzz
 │   │   ├── CanalisExecutorPause.t.sol      # setFlowActive blocks every trigger type, owner-only, unpause
@@ -166,7 +171,7 @@ canalis/
 │   │   ├── CanalisSwapPool.t.sol           # x*y=k correctness, fee, minAmountOut, reserve accounting, fuzz
 │   │   ├── CanalisAccount.t.sol            # executorTransfer trust boundary, fuzz
 │   │   ├── CanalisAccountFactory.t.sol     # one-account-per-owner
-│   │   └── mocks/MockERC20.sol             # 6-decimal mock USDC/EURC for tests
+│   │   └── mocks/MockERC20.sol, MockPyth.sol # 6-decimal mock USDC/EURC + settable-price mock oracle for tests
 │   ├── script/
 │   │   ├── Deploy.s.sol                    # deploys SwapPool + Executor + Factory + deployer's account
 │   │   ├── seed-swap-pool.sh               # owner-seeds CanalisSwapPool with USDC/EURC liquidity
@@ -182,19 +187,21 @@ canalis/
 │   │   ├── prove-lockrelease.sh            # live-testnet proof: LockRelease (still-locked, release-once, no double-release)
 │   │   ├── prove-pause.sh                  # live-testnet proof: pause blocks execution, unpause restores it
 │   │   ├── prove-preview.sh                # live-testnet proof: previewFlow matches a real executeFlow call
-│   │   └── prove-flowsof.sh                # live-testnet proof: flowsOf lists the owner's registered flow ids
+│   │   ├── prove-flowsof.sh                # live-testnet proof: flowsOf lists the owner's registered flow ids
+│   │   └── prove-oracle-condition.sh       # live-testnet proof: real Pyth price update + block-then-allow oracle condition
 │   └── .env.example                        # RPC_URL / PRIVATE_KEY placeholders
 ├── keeper/                         # standalone Node/TS + viem keeper service
 │   ├── src/
-│   │   ├── index.ts                        # poll loop: flowsOf + previewFlow (getLogs-free), poke executeFlow, tolerate reverts
-│   │   ├── abi.ts / chain.ts / config.ts    # minimal executor ABI, Arc testnet chain def, env config
-│   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / CANALIS_ACCOUNT / KEEPER_PRIVATE_KEY / POLL_INTERVAL_MS
+│   │   ├── index.ts                        # poll loop: flowsOf + previewFlow (getLogs-free), poke executeFlow, refresh stale oracle prices, tolerate reverts
+│   │   ├── abi.ts / chain.ts / config.ts    # minimal executor + IPyth ABI, Arc testnet chain def, env config
+│   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / CANALIS_ACCOUNT / KEEPER_PRIVATE_KEY / ORACLE_ADDRESS / HERMES_URL / POLL_INTERVAL_MS
 └── web/                            # Vite + React + TS frontend
     ├── src/
     │   ├── chains.ts / wagmi.ts             # Arc testnet chain + rate-limit-aware wagmi transport
     │   ├── lib/
     │   │   ├── flows.ts                     # TS mirror of the Solidity flow model + encode/decode
-    │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above (incl. CanalisSwapPool)
+    │   │   ├── oracleFeeds.ts                # curated real Pyth feed id catalog (production Hermes ids)
+    │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above (incl. CanalisSwapPool, IPyth)
     │   │   ├── composer.ts                  # composer draft state -> Flow, validation
     │   │   ├── flowSummary.ts               # plain-English flow/action summaries
     │   │   ├── contracts.ts                 # deployed-address env lookup
@@ -284,7 +291,17 @@ canalis/
   (`contracts/script/prove-amount-cap-condition.sh`,
   `prove-cooldown-condition.sh`) — a flow that violates the guard is
   blocked with the exact revert reason, the same flow within the guard
-  succeeds and moves USDC.
+  succeeds and moves USDC. A sixth condition — **oracle price**
+  (`priceId`/`priceThreshold`/`priceAbove`/`maxStaleness`) — is Canalis's
+  second Arc-native feature slice: reads a live price from Pyth's real
+  `IPyth` contract on Arc testnet (`getPriceUnsafe`), enforces its own
+  staleness check against `maxStaleness`, and normalizes every feed's
+  Pyth `expo` to one documented 18-decimal fixed-point USD unit. The
+  executor is read-only — it never calls `updatePriceFeeds` itself (see
+  keeper below). Proven live with a real EUR/USD price read from the
+  oracle: a flow whose threshold the current real price BLOCKS, then the
+  same flow with a threshold the price satisfies, ALLOWS
+  (`contracts/script/prove-oracle-condition.sh`).
 - A real off-chain **keeper** (`keeper/`, Node/TS + viem) — **entirely
   `getLogs`-free**: discovers a configured `CanalisAccount`'s flows via
   `flowsOf` (one `eth_call`), dry-runs each via `previewFlow`, and pokes
@@ -297,8 +314,15 @@ canalis/
   `OnSchedule` flow to fire with no human interaction; see
   `keeper/README.md` for how to run it and the trust model (a hot key
   that only ever calls `executeFlow`; the contract, not the caller, is
-  what's trusted). Services one configured account — multi-account
-  enumeration is future work.
+  what's trusted). Also keeps the oracle price condition's price fresh:
+  before evaluating a flow that carries one, it checks the on-chain
+  price's age against that flow's `maxStaleness` and, only if stale,
+  fetches a real signed update from Pyth's production Hermes API and
+  submits it (`updatePriceFeeds`, paying the real fee) — proven live: the
+  keeper autonomously refreshed the on-chain EUR/USD price and executed
+  an `OnSchedule` + oracle-conditioned flow with zero human interaction.
+  Services one configured account — multi-account enumeration is future
+  work.
 - **Pause/cancel** — `setFlowActive(flowId, active)`, owner-only (same
   auth model as Manual's `executeFlow`), emits `FlowActiveSet`. Blocks
   execution for every trigger type identically — a paused flow's
@@ -332,30 +356,32 @@ canalis/
   transaction. Proven live on Arc testnet: swap output matches the pool's
   own quote exactly, reserves move by exactly the swap amounts
   (`contracts/script/prove-swap-flow.sh`).
-- Foundry test suite: **168 passing tests** (17 fuzz tests, 256 runs each)
-  across `CanalisExecutor`, its condition guards, its triggers, its
-  LockRelease and Swap actions, pause, enriched events, preview,
-  per-owner enumeration, `CanalisSwapPool`, `CanalisAccount`, and
+- Foundry test suite: **186 passing tests** (17 fuzz tests, 256 runs each)
+  across `CanalisExecutor`, its condition guards (including the oracle
+  price condition against a `MockPyth`), its triggers, its LockRelease
+  and Swap actions, pause, enriched events, preview, per-owner
+  enumeration, `CanalisSwapPool`, `CanalisAccount`, and
   `CanalisAccountFactory`.
 - Frontend: a real visual flow **composer** (stepper: trigger → conditions
   → actions, including a Swap block with a live pool-quote-driven
-  slippage control), a **deployed-flows list** with pause/resume and
-  run-now (both real transactions, guarded against double-submit, with
-  decoded on-chain revert reasons), live `previewFlow`-backed status per
-  flow, and a **run log** built from real `FlowExecuted`/`ActionExecuted`
-  events — including an honest "ran automatically" detection (compares
-  each event's real `triggeredBy` against the connected wallet — an
-  on-chain fact, not a guess). Reads go through a throttled/retrying RPC
-  transport with a keyed-endpoint override, since the public Arc RPC (and
-  most free-tier keyed ones) cap `eth_getLogs` hard.
+  slippage control, and an oracle price condition block showing the live
+  Pyth price for the selected feed), a **deployed-flows list** with
+  pause/resume and run-now (both real transactions, guarded against
+  double-submit, with decoded on-chain revert reasons), live
+  `previewFlow`-backed status per flow, and a **run log** built from real
+  `FlowExecuted`/`ActionExecuted` events — including an honest "ran
+  automatically" detection (compares each event's real `triggeredBy`
+  against the connected wallet — an on-chain fact, not a guess). Reads go
+  through a throttled/retrying RPC transport with a keyed-endpoint
+  override, since the public Arc RPC (and most free-tier keyed ones) cap
+  `eth_getLogs` hard.
 
 ### Stubbed (explicit reverts / honest "Coming soon" UI — never faked)
 
 - Circle Wallet onboarding and Gas Station/Paymaster sponsorship — no
   Circle SDK integration; wagmi uses a plain injected connector.
-- The remaining Arc-native feature slices (oracle price condition, CCTP
-  action, treasury-rebalance and DCA composite templates) — see
-  `docs/canalis-spec.md` §7.3.
+- The remaining Arc-native feature slices (CCTP action, treasury-rebalance
+  and DCA composite templates) — see `docs/canalis-spec.md` §7.3.
 
 ## Getting started
 

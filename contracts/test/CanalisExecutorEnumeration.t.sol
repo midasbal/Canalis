@@ -26,7 +26,7 @@ contract CanalisExecutorEnumerationTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor(makeAddr("swapPool"));
+        executor = new CanalisExecutor(makeAddr("swapPool"), makeAddr("oracle"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);

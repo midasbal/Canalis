@@ -16,11 +16,15 @@ consume") and no state changes — a normal, expected outcome the keeper just
 logs and moves past, not an error.
 
 The keeper's private key (`KEEPER_PRIVATE_KEY`) is a **hot key** that only
-ever calls `executeFlow`. It cannot move user funds on its own — only the
-executor contract's own logic can move money out of a `CanalisAccount`, and
-that logic doesn't trust `msg.sender` for these trigger types, it trusts the
-on-chain precondition. The key still needs a small amount of Arc's native
-gas-USDC to pay for its own transactions.
+ever calls `executeFlow` on the executor and `updatePriceFeeds` on the Pyth
+oracle (see "Oracle price updates" below) — it cannot move user funds on
+its own. Only the executor contract's own logic can move money out of a
+`CanalisAccount`, and that logic doesn't trust `msg.sender` for these
+trigger types, it trusts the on-chain precondition; `updatePriceFeeds` only
+ever pushes a Pyth-signed price value, it has no path to touch account
+funds either. The key still needs a small amount of Arc's native gas-USDC
+to pay for its own transactions (plus Pyth's update fee, also paid in the
+native gas token, when it refreshes a price).
 
 ## Flow discovery
 
@@ -54,6 +58,59 @@ npm start
 
 Requires Node 24+ (runs the TypeScript source directly via Node's built-in
 type stripping — no build step needed for local runs).
+
+## Oracle price updates
+
+Arc-native feature slice (spec section 7.3 #2): a flow's Condition can
+require a live Pyth price to be above/below a threshold. `CanalisExecutor`
+is a **read-only** consumer of the oracle — it never calls
+`updatePriceFeeds` itself, since that would make the `view`-only
+`_checkConditions`/`previewFlow` path a state-mutating call. Keeping the
+stored price fresh is this keeper's job instead, on the same
+"caller-agnostic precondition, not a decision" model as
+OnSchedule/OnThreshold.
+
+**Important — production Hermes, not testnet/beta Hermes:** Arc testnet's
+deployed Pyth contract (`0x2880aB155794e7179c9eE2e38200202908C17B43`)
+verifies price updates against the REAL production Wormhole guardian set
+(confirmed on-chain: guardian_set_index 7, 13-of-19 signatures on a
+successful update we observed). It rejects updates signed by
+`hermes-beta.pyth.network` (Pyth's testnet Hermes, which signs with a
+single dev guardian, index 0) with `InvalidWormholeVaa`. So this keeper —
+and the composer's feed catalog (`web/src/lib/oracleFeeds.ts`) — use
+`hermes.pyth.network` (production Hermes) and PRODUCTION feed ids
+throughout. This means the price CanalisExecutor reads is a genuinely real,
+live market price, not a synthetic testnet one — a stronger result than
+the spec anticipated ("testnet prices may be synthetic/stale... the
+mechanism must still be real"), discovered by testing both variants
+directly against the deployed contract rather than assuming the docs'
+"testnet API" pointer would work.
+
+Each poll (`pollOnce`):
+
+1. Reads every candidate flow's conditions (`getFlow`) and collects the
+   distinct oracle `priceId`s referenced, each mapped to the **strictest**
+   `maxStaleness` any of those flows requires for that feed.
+2. For each distinct `priceId`, reads the oracle's currently stored price
+   (`getPriceUnsafe`) and checks its age against that requirement.
+3. Only for feeds that are actually stale (or have never been pushed
+   on-chain at all) does it fetch a fresh signed update from Pyth's Hermes
+   API (`HERMES_URL`, default `https://hermes-beta.pyth.network`) and
+   submit it via `oracle.updatePriceFeeds(updateData)`, paying
+   `oracle.getUpdateFee(updateData)` in the chain's native gas token.
+4. Then proceeds with the normal `previewFlow` → `executeFlow` loop as
+   before.
+
+A poll with no oracle-conditioned flows costs nothing extra — the
+`priceId` collection step is a no-op. A poll with one already-fresh feed
+also spends nothing beyond the one `getPriceUnsafe` read. **Extra gas**:
+`updatePriceFeeds` is itself a paid on-chain transaction (native gas token,
+plus Pyth's own update fee in the same token) — only sent when a feed is
+actually stale, not every poll. An oracle-refresh failure (Hermes down, a
+bad update payload, insufficient fee) is logged and the poll continues
+without it — flows needing that price just fail their own staleness check
+downstream with a clear on-chain reason, the same as any other unmet
+precondition, rather than taking the whole keeper down.
 
 ## Demo tip
 

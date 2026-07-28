@@ -25,6 +25,9 @@ export const CANALIS_SWAP_POOL_ADDRESS = (import.meta.env.VITE_CANALIS_SWAP_POOL
   | Address
   | undefined;
 
+/** Pyth's real IPyth contract on Arc testnet — every oracle price condition reads from here. */
+export const CANALIS_ORACLE_ADDRESS = (import.meta.env.VITE_ORACLE_ADDRESS || undefined) as Address | undefined;
+
 /**
  * Block CanalisExecutor was deployed at. Only used as a lower bound on the
  * run log's recent-history window (see CANALIS_RUNLOG_LOOKBACK_BLOCKS below)

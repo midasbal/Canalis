@@ -16,4 +16,13 @@ export const config = {
   canalisAccount: requireEnv("CANALIS_ACCOUNT") as `0x${string}`,
   keeperPrivateKey: requireEnv("KEEPER_PRIVATE_KEY") as `0x${string}`,
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? "60000"),
+  // Pyth's real IPyth contract on Arc testnet — see CLAUDE.md / Deploy.s.sol.
+  oracleAddress: requireEnv("ORACLE_ADDRESS") as `0x${string}`,
+  // Pyth's PRODUCTION Hermes price-update API (free, no key) — NOT
+  // hermes-beta.pyth.network. Confirmed on-chain: Arc testnet's deployed
+  // Pyth contract verifies against the real production Wormhole guardian
+  // set and rejects hermes-beta-signed updates with "InvalidWormholeVaa"
+  // (also means production feed ids, not the beta catalog's ids — see
+  // web/src/lib/oracleFeeds.ts / docs/canalis-spec.md section 7.3 #2).
+  hermesUrl: process.env.HERMES_URL ?? "https://hermes.pyth.network",
 };

@@ -52,7 +52,18 @@ export interface Condition {
   minBalance: bigint;
   allowedRecipients: Address[];
   deniedRecipients: Address[];
+  /** Pyth price feed id; `PRICE_ID_UNSET` = no oracle constraint. */
+  priceId: Hex;
+  /** 18-decimal fixed-point USD price threshold (e.g. 1.08 => 1_080000000000000000n). Only meaningful when priceId is set. */
+  priceThreshold: bigint;
+  /** true = price must be >= priceThreshold, false = price must be <= priceThreshold. */
+  priceAbove: boolean;
+  /** seconds; the oracle's stored price must be no older than this. */
+  maxStaleness: bigint;
 }
+
+/** Mirrors Solidity's `bytes32(0)` sentinel for `Condition.priceId` — unset, no oracle constraint. */
+export const PRICE_ID_UNSET: Hex = `0x${"0".repeat(64)}`;
 
 export interface Action {
   kind: ActionType;
@@ -109,6 +120,10 @@ export const flowAbiParameter = {
         { name: "minBalance", type: "uint256" },
         { name: "allowedRecipients", type: "address[]" },
         { name: "deniedRecipients", type: "address[]" },
+        { name: "priceId", type: "bytes32" },
+        { name: "priceThreshold", type: "uint256" },
+        { name: "priceAbove", type: "bool" },
+        { name: "maxStaleness", type: "uint256" },
       ],
     },
     {

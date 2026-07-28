@@ -1,6 +1,8 @@
-import { ActionType, SCHEDULE_NEVER_AGAIN, TriggerType, type Action, type Condition, type Flow, type Trigger } from "./flows";
+import { formatUnits } from "viem";
+import { ActionType, PRICE_ID_UNSET, SCHEDULE_NEVER_AGAIN, TriggerType, type Action, type Condition, type Flow, type Trigger } from "./flows";
 import { formatDuration, formatTimestamp, formatUsdc, shortAddress } from "./format";
 import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
+import { oracleFeedByPriceId } from "./oracleFeeds";
 
 /** Resolves a token address to a readable symbol where known (USDC/EURC), else a shortened address. */
 function tokenSymbol(address: string): string {
@@ -73,6 +75,11 @@ function summarizeConditions(conditions: Condition[]): string[] {
     }
     if (c.deniedRecipients.length > 0) {
       parts.push(`never paying ${c.deniedRecipients.map(shortAddress).join(", ")}`);
+    }
+    if (c.priceId !== PRICE_ID_UNSET) {
+      const feedLabel = oracleFeedByPriceId(c.priceId)?.label ?? shortAddress(c.priceId);
+      const priceUsd = Number(formatUnits(c.priceThreshold, 18));
+      parts.push(`${feedLabel} is ${c.priceAbove ? "at or above" : "below"} ${priceUsd}`);
     }
   }
   return parts;

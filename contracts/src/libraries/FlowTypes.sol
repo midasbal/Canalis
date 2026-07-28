@@ -43,6 +43,15 @@ library FlowTypes {
         uint256 minBalance; // account must hold at least this much USDC
         address[] allowedRecipients; // empty = no allowlist restriction
         address[] deniedRecipients; // empty = no denylist restriction
+        // Oracle price condition (Arc-native feature slice, spec §7.3 #2).
+        // Reads CanalisExecutor's configured Pyth oracle — see
+        // CanalisExecutor._checkOracleCondition. bytes32(0) = unset (no
+        // constraint); when set, priceThreshold/priceAbove/maxStaleness all
+        // become meaningful together.
+        bytes32 priceId; // Pyth price feed id, bytes32(0) = unset
+        uint256 priceThreshold; // 18-decimal fixed-point USD price (e.g. 1.08 => 1_080000000000000000)
+        bool priceAbove; // true = price must be >= threshold, false = price must be <= threshold
+        uint256 maxStaleness; // seconds; stored oracle price older than this is rejected
     }
 
     /// @notice A single action step. Not every field applies to every ActionType;

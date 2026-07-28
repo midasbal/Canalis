@@ -187,6 +187,28 @@ export const canalisSwapPoolAbi = [
   },
 ] as const;
 
+/** Minimal IPyth subset — just the live-price read the composer displays next to an oracle condition. */
+export const pythAbi = [
+  {
+    type: "function",
+    name: "getPriceUnsafe",
+    stateMutability: "view",
+    inputs: [{ name: "id", type: "bytes32" }],
+    outputs: [
+      {
+        name: "price",
+        type: "tuple",
+        components: [
+          { name: "price", type: "int64" },
+          { name: "conf", type: "uint64" },
+          { name: "expo", type: "int32" },
+          { name: "publishTime", type: "uint256" },
+        ],
+      },
+    ],
+  },
+] as const;
+
 export const canalisAccountFactoryAbi = [
   {
     type: "function",

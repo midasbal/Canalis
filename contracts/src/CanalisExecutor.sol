@@ -9,6 +9,7 @@ import {FlowTypes} from "./libraries/FlowTypes.sol";
 import {ICanalisExecutor} from "./interfaces/ICanalisExecutor.sol";
 import {CanalisAccount} from "./CanalisAccount.sol";
 import {CanalisSwapPool} from "./CanalisSwapPool.sol";
+import {IPyth, PythStructs} from "./interfaces/IPyth.sol";
 
 /// @title CanalisExecutor
 /// @notice The single generic "money interpreter" for Canalis. Instead of
@@ -65,6 +66,18 @@ import {CanalisSwapPool} from "./CanalisSwapPool.sol";
 /// use. "Swap and pay out" rather than "swap and hold" — simplest correct
 /// path that needs zero CanalisAccount changes; see `_handleSwap` for the
 /// exact custody path.
+///
+/// ARC-NATIVE FEATURE: Oracle price condition (spec section 7.3 #2). A
+/// `Condition` can additionally require a live Pyth price to be
+/// above/below a threshold (`FlowTypes.Condition.priceId`/`priceThreshold`/
+/// `priceAbove`/`maxStaleness`). `oracle` (immutable, constructor-configured
+/// like `swapPool`) is the real Pyth contract deployed on Arc testnet — see
+/// `_checkOracleCondition`. This is a READ-ONLY consumer: CanalisExecutor
+/// never calls `updatePriceFeeds` itself (that would make `_checkConditions`
+/// — a `view` function shared by `previewFlow` — a state-mutating call);
+/// keeping the stored price fresh is the off-chain keeper's job (see
+/// keeper/README.md), exactly like OnSchedule/OnThreshold's precondition
+/// re-checks are the keeper's job to poke, not decide.
 contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -102,14 +115,23 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// single USDC/EURC pair.
     CanalisSwapPool public immutable swapPool;
 
+    /// @dev The single Pyth oracle contract every oracle price condition
+    /// reads from (see FlowTypes.Condition.priceId / class docs "ARC-NATIVE
+    /// FEATURE: Oracle price condition" below). Configured at construction
+    /// like `swapPool` — never hardcoded, never a mock: this must be the
+    /// real Pyth contract deployed on Arc testnet.
+    IPyth public immutable oracle;
+
     modifier flowExists(uint256 flowId) {
         require(_flows[flowId].owner != address(0), "CanalisExecutor: unknown flow");
         _;
     }
 
-    constructor(address swapPool_) {
+    constructor(address swapPool_, address oracle_) {
         require(swapPool_ != address(0), "CanalisExecutor: swapPool required");
+        require(oracle_ != address(0), "CanalisExecutor: oracle required");
         swapPool = CanalisSwapPool(swapPool_);
+        oracle = IPyth(oracle_);
     }
 
     /// @inheritdoc ICanalisExecutor
@@ -122,6 +144,14 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             // at registration rather than letting a "below" flow sit
             // forever unable to fire.
             require(flow.trigger.thresholdIsAbove, "CanalisExecutor: only at/above threshold supported");
+        }
+        for (uint256 i = 0; i < flow.conditions.length; i++) {
+            if (flow.conditions[i].priceId != bytes32(0)) {
+                // Fail fast rather than registering a condition that would
+                // reject on staleness at every evaluation (age > 0 always
+                // exceeds a maxStaleness of 0).
+                require(flow.conditions[i].maxStaleness > 0, "CanalisExecutor: maxStaleness required with priceId");
+            }
         }
 
         flowId = _nextFlowId++;
@@ -336,6 +366,8 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             if (!ok) return (false, reason);
             (ok, reason) = _checkAmountCap(flowId, flow.owner, flow, condition);
             if (!ok) return (false, reason);
+            (ok, reason) = _checkOracleCondition(condition);
+            if (!ok) return (false, reason);
         }
         return (true, "");
     }
@@ -479,6 +511,64 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
                 total += action.fixedAmount;
             }
         }
+    }
+
+    /// @dev Condition.priceId/priceThreshold/priceAbove/maxStaleness: a
+    /// live Pyth price read, enforced against the flow's configured
+    /// threshold. Sentinel: `priceId == bytes32(0)` = unset (no oracle
+    /// constraint) — the common case, checked first so flows without an
+    /// oracle condition pay nothing extra.
+    ///
+    /// Uses `oracle.getPriceUnsafe` (never reverts on staleness — only if
+    /// the feed itself is unknown) and does the staleness comparison here
+    /// against the flow's OWN `maxStaleness`, rather than
+    /// `getPriceNoOlderThan`'s fixed bound baked into the call. Wrapped in
+    /// try/catch so an oracle-side revert (e.g. unknown feed id) surfaces
+    /// as a normal (false, reason) result — this function must never
+    /// revert, since it's shared by `previewFlow`'s non-reverting
+    /// dry-run contract.
+    ///
+    /// PRICE NORMALIZATION: Pyth prices are `price * 10**expo`; this
+    /// contract normalizes every feed to an 18-decimal fixed-point USD
+    /// value via `_normalizePrice18` so `priceThreshold` has one fixed,
+    /// documented unit regardless of a feed's native `expo` (e.g. -5 for
+    /// FX pairs, -8 for crypto pairs) — see FlowTypes.Condition docs.
+    function _checkOracleCondition(FlowTypes.Condition storage condition) internal view returns (bool, string memory) {
+        if (condition.priceId == bytes32(0)) return (true, "");
+
+        try oracle.getPriceUnsafe(condition.priceId) returns (PythStructs.Price memory p) {
+            if (p.price <= 0) return (false, "CanalisExecutor: oracle price invalid");
+
+            uint256 age = block.timestamp >= p.publishTime ? block.timestamp - p.publishTime : 0;
+            if (age > condition.maxStaleness) return (false, "CanalisExecutor: oracle price stale");
+
+            uint256 normalized = _normalizePrice18(uint64(p.price), p.expo);
+            if (condition.priceAbove) {
+                if (normalized < condition.priceThreshold) return (false, "CanalisExecutor: price condition not met");
+            } else {
+                if (normalized > condition.priceThreshold) return (false, "CanalisExecutor: price condition not met");
+            }
+            return (true, "");
+        } catch {
+            return (false, "CanalisExecutor: oracle price unavailable");
+        }
+    }
+
+    /// @dev Rescales a Pyth `(price, expo)` pair (real value = `price *
+    /// 10**expo`) to an 18-decimal fixed-point uint256 (real value =
+    /// `result / 1e18`). `expo` is virtually always negative for Pyth spot
+    /// feeds (e.g. -5 FX, -8 crypto) but the positive/zero branch is
+    /// handled too for completeness. Truncates (loses precision) only when
+    /// `-expo > 18`, which no current Pyth feed exceeds.
+    function _normalizePrice18(uint64 price, int32 expo) internal pure returns (uint256) {
+        if (expo >= 0) {
+            return uint256(price) * (10 ** uint32(expo)) * 1e18;
+        }
+        uint32 absExpo = uint32(-expo);
+        if (absExpo <= 18) {
+            return uint256(price) * (10 ** (18 - absExpo));
+        }
+        return uint256(price) / (10 ** (absExpo - 18));
     }
 
     // ---------------------------------------------------------------------

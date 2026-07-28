@@ -19,6 +19,14 @@ contract Deploy is Script {
     address constant USDC_ADDRESS = 0x3600000000000000000000000000000000000000;
     /// Arc testnet EURC ERC-20 interface. 6 decimals.
     address constant EURC_ADDRESS = 0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a;
+    /// Pyth's IPyth contract on Arc testnet, confirmed live (has code) via
+    /// `cast codesize` against the real RPC — see docs/canalis-spec.md
+    /// section 7.3 #2. A proxy contract; do not swap for a guessed address.
+    /// IMPORTANT: verifies updates against the real PRODUCTION Wormhole
+    /// guardian set (confirmed on-chain) — price updates must come from
+    /// hermes.pyth.network (production Hermes), NOT hermes-beta; see
+    /// keeper/README.md "Oracle price updates".
+    address constant PYTH_ORACLE_ADDRESS = 0x2880aB155794e7179c9eE2e38200202908C17B43;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -27,7 +35,7 @@ contract Deploy is Script {
         vm.startBroadcast(deployerKey);
 
         CanalisSwapPool pool = new CanalisSwapPool(deployer, USDC_ADDRESS, EURC_ADDRESS);
-        CanalisExecutor executor = new CanalisExecutor(address(pool));
+        CanalisExecutor executor = new CanalisExecutor(address(pool), PYTH_ORACLE_ADDRESS);
         CanalisAccountFactory factory = new CanalisAccountFactory(USDC_ADDRESS, address(executor));
         address account = factory.createAccount();
 
@@ -35,6 +43,7 @@ contract Deploy is Script {
 
         console.log("Deployer:", deployer);
         console.log("CanalisSwapPool deployed at:", address(pool));
+        console.log("Pyth oracle (existing, not deployed):", PYTH_ORACLE_ADDRESS);
         console.log("CanalisExecutor deployed at:", address(executor));
         console.log("CanalisAccountFactory deployed at:", address(factory));
         console.log("Deployer's CanalisAccount created at:", account);

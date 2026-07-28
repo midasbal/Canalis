@@ -1,8 +1,9 @@
 import { isAddress, parseUnits } from "viem";
 import type { Address } from "viem";
-import { ActionType, TriggerType, type Action, type Condition, type Flow } from "./flows";
+import { ActionType, PRICE_ID_UNSET, TriggerType, type Action, type Condition, type Flow } from "./flows";
 import { USDC_DECIMALS, datetimeLocalToUnixSeconds } from "./format";
 import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
+import { ORACLE_FEEDS } from "./oracleFeeds";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 
@@ -52,7 +53,7 @@ export function defaultDraft(): ComposerDraft {
 // Conditions
 // ---------------------------------------------------------------------
 
-export type ConditionKind = "amountCap" | "minBalance" | "cooldown" | "timeWindow" | "allowList" | "denyList";
+export type ConditionKind = "amountCap" | "minBalance" | "cooldown" | "timeWindow" | "allowList" | "denyList" | "oraclePrice";
 
 export const CONDITION_KIND_LABELS: Record<ConditionKind, string> = {
   amountCap: "Amount cap",
@@ -61,6 +62,7 @@ export const CONDITION_KIND_LABELS: Record<ConditionKind, string> = {
   timeWindow: "Time window",
   allowList: "Allow-list recipients",
   denyList: "Deny-list recipients",
+  oraclePrice: "Oracle price",
 };
 
 export interface AddressRow {
@@ -78,6 +80,11 @@ export interface ComposerCondition {
   windowStart: string; // datetime-local
   windowEnd: string; // datetime-local
   recipients: AddressRow[]; // allowList / denyList
+  // oraclePrice
+  oracleFeedKey: string; // key into ORACLE_FEEDS (lib/oracleFeeds.ts)
+  oracleDirection: "above" | "below";
+  oracleThreshold: string; // decimal USD price, e.g. "1.08"
+  oracleMaxStalenessSeconds: string;
 }
 
 export function emptyCondition(kind: ConditionKind): ComposerCondition {
@@ -91,6 +98,10 @@ export function emptyCondition(kind: ConditionKind): ComposerCondition {
     windowStart: "",
     windowEnd: "",
     recipients: [],
+    oracleFeedKey: ORACLE_FEEDS[0].key,
+    oracleDirection: "below",
+    oracleThreshold: "",
+    oracleMaxStalenessSeconds: "300",
   };
 }
 
@@ -187,6 +198,17 @@ function parseIntSafe(value: string): bigint | null {
   return BigInt(value.trim());
 }
 
+/** Parses a decimal USD price string (e.g. "1.08") into the 18-decimal fixed-point uint CanalisExecutor compares against — see FlowTypes.Condition.priceThreshold docs. */
+function parsePrice18Safe(value: string): bigint | null {
+  if (!value.trim()) return null;
+  try {
+    const parsed = parseUnits(value.trim(), 18);
+    return parsed > 0n ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------
 // Draft -> Flow (tolerant: invalid/missing fields fall back to sentinel
 // zero values so a partially-filled draft can still be summarized/previewed
@@ -234,6 +256,10 @@ function conditionToStruct(condition: ComposerCondition): Condition {
     minBalance: 0n,
     allowedRecipients: [],
     deniedRecipients: [],
+    priceId: PRICE_ID_UNSET,
+    priceThreshold: 0n,
+    priceAbove: false,
+    maxStaleness: 0n,
   };
 
   switch (condition.kind) {
@@ -253,6 +279,16 @@ function conditionToStruct(condition: ComposerCondition): Condition {
       return { ...base, allowedRecipients: validAddresses(condition.recipients) };
     case "denyList":
       return { ...base, deniedRecipients: validAddresses(condition.recipients) };
+    case "oraclePrice": {
+      const feed = ORACLE_FEEDS.find((f) => f.key === condition.oracleFeedKey);
+      return {
+        ...base,
+        priceId: feed?.priceId ?? PRICE_ID_UNSET,
+        priceThreshold: parsePrice18Safe(condition.oracleThreshold) ?? 0n,
+        priceAbove: condition.oracleDirection === "above",
+        maxStaleness: parseIntSafe(condition.oracleMaxStalenessSeconds) ?? 0n,
+      };
+    }
     default:
       return base;
   }
@@ -384,6 +420,12 @@ export function validateComposerDraft(
       else if (validAddresses(c.recipients).length !== c.recipients.length) {
         errors.push(`${label}: every address must be a valid 0x… address.`);
       }
+    }
+    if (c.kind === "oraclePrice") {
+      if (!ORACLE_FEEDS.some((f) => f.key === c.oracleFeedKey)) errors.push(`${label}: pick a feed.`);
+      if (parsePrice18Safe(c.oracleThreshold) === null) errors.push(`${label}: enter a valid price threshold greater than 0.`);
+      const staleness = parseIntSafe(c.oracleMaxStalenessSeconds);
+      if (staleness === null || staleness <= 0n) errors.push(`${label}: max staleness must be a whole number of seconds greater than 0.`);
     }
   }
 

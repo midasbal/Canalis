@@ -25,7 +25,7 @@ contract CanalisExecutorConditionsTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor(makeAddr("swapPool"));
+        executor = new CanalisExecutor(makeAddr("swapPool"), makeAddr("oracle"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -107,7 +107,11 @@ contract CanalisExecutorConditionsTest is Test {
             windowEnd: windowEnd,
             minBalance: minBalance,
             allowedRecipients: allowedRecipients,
-            deniedRecipients: deniedRecipients
+            deniedRecipients: deniedRecipients,
+            priceId: bytes32(0),
+            priceThreshold: 0,
+            priceAbove: false,
+            maxStaleness: 0
         });
     }
 
