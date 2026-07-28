@@ -27,6 +27,12 @@ contract Deploy is Script {
     /// hermes.pyth.network (production Hermes), NOT hermes-beta; see
     /// keeper/README.md "Oracle price updates".
     address constant PYTH_ORACLE_ADDRESS = 0x2880aB155794e7179c9eE2e38200202908C17B43;
+    /// Circle CCTP V2 TokenMessengerV2 on Arc testnet (domain 26), confirmed
+    /// live via `cast codesize` and confirmed correctly wired to Ethereum
+    /// Sepolia (domain 0) via `remoteTokenMessengers(0)` — see
+    /// docs/canalis-spec.md section 7.3 #3. Deployed via CREATE2 at the SAME
+    /// address on every CCTP V2-supported chain, including Ethereum Sepolia.
+    address constant CCTP_TOKEN_MESSENGER_ADDRESS = 0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -35,7 +41,8 @@ contract Deploy is Script {
         vm.startBroadcast(deployerKey);
 
         CanalisSwapPool pool = new CanalisSwapPool(deployer, USDC_ADDRESS, EURC_ADDRESS);
-        CanalisExecutor executor = new CanalisExecutor(address(pool), PYTH_ORACLE_ADDRESS);
+        CanalisExecutor executor =
+            new CanalisExecutor(address(pool), PYTH_ORACLE_ADDRESS, CCTP_TOKEN_MESSENGER_ADDRESS);
         CanalisAccountFactory factory = new CanalisAccountFactory(USDC_ADDRESS, address(executor));
         address account = factory.createAccount();
 
@@ -44,6 +51,7 @@ contract Deploy is Script {
         console.log("Deployer:", deployer);
         console.log("CanalisSwapPool deployed at:", address(pool));
         console.log("Pyth oracle (existing, not deployed):", PYTH_ORACLE_ADDRESS);
+        console.log("CCTP TokenMessengerV2 (existing, not deployed):", CCTP_TOKEN_MESSENGER_ADDRESS);
         console.log("CanalisExecutor deployed at:", address(executor));
         console.log("CanalisAccountFactory deployed at:", address(factory));
         console.log("Deployer's CanalisAccount created at:", account);

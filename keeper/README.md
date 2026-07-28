@@ -120,6 +120,48 @@ two) — within one or two poll cycles you'll see the keeper log a
 `executeFlow` transaction hash it sent on its own, with no human interaction,
 linking straight to `testnet.arcscan.app`.
 
+## Completing a CCTP bridge
+
+Arc-native feature slice (spec section 7.3 #3): a flow's `Bridge` action
+burns USDC on Arc via Circle's real CCTP V2 `TokenMessengerV2` —
+`CanalisExecutor` only ever proves that burn (see its "ARC-NATIVE FEATURE:
+CCTP Bridge" docs). The mint on the destination chain is a separate,
+asynchronous transaction that needs Circle's off-chain attestation service
+to sign the burn message first — `scripts/complete-cctp-bridge.ts` is that
+second leg, run standalone (it is NOT part of the poll loop above; a
+bridge completion isn't a flow to poke, it's a one-shot follow-up to one
+specific burn transaction).
+
+```bash
+cd keeper
+npm install
+# add SEPOLIA_RPC_URL and SEPOLIA_PRIVATE_KEY to .env (see .env.example) —
+# a Sepolia wallet funded with a small amount of Sepolia ETH for gas; it
+# does NOT need to be the wallet that burned the USDC or the mint
+# recipient, since CCTP's destinationCaller is bytes32(0) (permissionless)
+node --env-file=.env scripts/complete-cctp-bridge.ts <arcBurnTxHash>
+```
+
+What it does:
+
+1. Polls Circle's real testnet CCTP V2 attestation API (Iris,
+   `https://iris-api-sandbox.circle.com` — NOT the production
+   `iris-api.circle.com`) for the burn transaction, until it reports
+   `status: "complete"` (Circle has signed it). In practice this has been
+   near-instant (seconds) on testnet, but standard transfers wait for
+   source-chain finality first, so budget a few minutes.
+2. Reads the recipient's Sepolia USDC balance before.
+3. Calls `MessageTransmitterV2.receiveMessage(message, attestation)` on
+   Ethereum Sepolia with the real message + attestation Circle returned.
+4. Reads the recipient's Sepolia USDC balance after and prints the delta,
+   plus the mint tx as a `sepolia.etherscan.io` link.
+
+Proven live: a 1 USDC burn on Arc was picked up by Circle's real
+attestation service and minted on Ethereum Sepolia — recipient balance
+went from `0` to `1000000` (1.000000 USDC). See
+`contracts/script/prove-cctp-bridge.sh` for the burn-leg proof this
+completion script picks up after.
+
 ## What it does NOT do
 
 - It does not decide amounts, recipients, or whether a flow *should* exist —

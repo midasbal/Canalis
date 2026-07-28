@@ -84,7 +84,9 @@ contract ProveForwardFlow is Script {
             unlockTime: 0,
             tokenIn: address(0),
             tokenOut: address(0),
-            minAmountOut: 0
+            minAmountOut: 0,
+            destinationDomain: 0,
+            mintRecipient: bytes32(0)
         });
         flow.actions = actions;
 

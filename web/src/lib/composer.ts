@@ -1,9 +1,19 @@
 import { isAddress, parseUnits } from "viem";
 import type { Address } from "viem";
-import { ActionType, PRICE_ID_UNSET, TriggerType, type Action, type Condition, type Flow } from "./flows";
+import {
+  ActionType,
+  MINT_RECIPIENT_UNSET,
+  PRICE_ID_UNSET,
+  TriggerType,
+  addressToBytes32,
+  type Action,
+  type Condition,
+  type Flow,
+} from "./flows";
 import { USDC_DECIMALS, datetimeLocalToUnixSeconds } from "./format";
 import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
 import { ORACLE_FEEDS } from "./oracleFeeds";
+import { BRIDGE_DESTINATIONS } from "./bridgeDestinations";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 
@@ -119,6 +129,7 @@ export const ACTION_KIND_LABELS: Record<ActionType, string> = {
   [ActionType.Sweep]: "Sweep",
   [ActionType.LockRelease]: "Lock / release",
   [ActionType.Swap]: "Swap",
+  [ActionType.Bridge]: "Bridge",
 };
 
 export type SwapTokenSymbol = "USDC" | "EURC";
@@ -151,6 +162,10 @@ export interface ComposerAction {
   swapRecipient: string;
   swapSlippageBps: string; // UI-only tolerance; the composer derives swapMinAmountOut from this + a live pool quote
   swapMinAmountOut: string; // the actual on-chain slippage floor — kept in sync with slippageBps by the UI (see composer/SwapQuote.tsx), but this is the field that's actually sent
+  // Bridge (CCTP V2)
+  bridgeDestinationKey: string; // key into BRIDGE_DESTINATIONS (lib/bridgeDestinations.ts)
+  bridgeAmount: string; // USDC
+  bridgeRecipient: string; // EVM address on the destination chain
 }
 
 export function emptyAction(kind: ActionType): ComposerAction {
@@ -171,6 +186,9 @@ export function emptyAction(kind: ActionType): ComposerAction {
     swapRecipient: "",
     swapSlippageBps: "100", // 1% default tolerance
     swapMinAmountOut: "",
+    bridgeDestinationKey: BRIDGE_DESTINATIONS[0].key,
+    bridgeAmount: "",
+    bridgeRecipient: "",
   };
 }
 
@@ -309,6 +327,8 @@ function actionToStruct(action: ComposerAction): Action {
     tokenIn: ZERO_ADDRESS,
     tokenOut: ZERO_ADDRESS,
     minAmountOut: 0n,
+    destinationDomain: 0,
+    mintRecipient: MINT_RECIPIENT_UNSET,
   };
 
   switch (action.kind) {
@@ -347,6 +367,16 @@ function actionToStruct(action: ComposerAction): Action {
         tokenIn: tokenIn ?? ZERO_ADDRESS,
         tokenOut: tokenOut ?? ZERO_ADDRESS,
         minAmountOut: parseUsdcSafe(action.swapMinAmountOut) ?? 0n,
+      };
+    }
+    case ActionType.Bridge: {
+      const destination = BRIDGE_DESTINATIONS.find((d) => d.key === action.bridgeDestinationKey);
+      const recipient = action.bridgeRecipient.trim();
+      return {
+        ...base,
+        fixedAmount: parseUsdcSafe(action.bridgeAmount) ?? 0n,
+        destinationDomain: destination?.domain ?? 0,
+        mintRecipient: isAddress(recipient) ? addressToBytes32(recipient) : MINT_RECIPIENT_UNSET,
       };
     }
     default:
@@ -477,6 +507,12 @@ export function validateComposerDraft(
       if (minAmountOut === null || minAmountOut <= 0n) {
         errors.push(`${label}: minimum received must be a valid amount greater than 0 — real slippage protection, not zero.`);
       }
+    }
+    if (a.kind === ActionType.Bridge) {
+      if (!BRIDGE_DESTINATIONS.some((d) => d.key === a.bridgeDestinationKey)) errors.push(`${label}: pick a destination chain.`);
+      const amount = parseUsdcSafe(a.bridgeAmount);
+      if (amount === null || amount <= 0n) errors.push(`${label}: amount to bridge must be greater than 0.`);
+      if (!isAddress(a.bridgeRecipient.trim())) errors.push(`${label}: recipient must be a valid 0x… address.`);
     }
   }
 

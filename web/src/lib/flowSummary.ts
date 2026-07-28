@@ -1,8 +1,19 @@
 import { formatUnits } from "viem";
-import { ActionType, PRICE_ID_UNSET, SCHEDULE_NEVER_AGAIN, TriggerType, type Action, type Condition, type Flow, type Trigger } from "./flows";
+import {
+  ActionType,
+  PRICE_ID_UNSET,
+  SCHEDULE_NEVER_AGAIN,
+  TriggerType,
+  bytes32ToAddress,
+  type Action,
+  type Condition,
+  type Flow,
+  type Trigger,
+} from "./flows";
 import { formatDuration, formatTimestamp, formatUsdc, shortAddress } from "./format";
 import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
 import { oracleFeedByPriceId } from "./oracleFeeds";
+import { bridgeDestinationByDomain } from "./bridgeDestinations";
 
 /** Resolves a token address to a readable symbol where known (USDC/EURC), else a shortened address. */
 export function tokenSymbol(address: string): string {
@@ -107,6 +118,11 @@ function summarizeAction(action: Action): string {
       return `lock ${formatUsdc(action.fixedAmount)} USDC, releasable to ${shortAddress(action.recipients[0] ?? "0x0")} at ${formatTimestamp(action.unlockTime)}`;
     case ActionType.Swap:
       return `swap ${formatUsdc(action.fixedAmount)} ${tokenSymbol(action.tokenIn)} to ${tokenSymbol(action.tokenOut)} (min ${formatUsdc(action.minAmountOut)}), paid to ${shortAddress(action.recipients[0] ?? "0x0")}`;
+    case ActionType.Bridge: {
+      const destination = bridgeDestinationByDomain(action.destinationDomain);
+      const destinationLabel = destination?.label ?? `CCTP domain ${action.destinationDomain}`;
+      return `bridge ${formatUsdc(action.fixedAmount)} USDC to ${destinationLabel} (${shortAddress(bytes32ToAddress(action.mintRecipient))})`;
+    }
     default:
       return "do an unknown action";
   }
@@ -125,6 +141,8 @@ export function actionTypeLabel(kind: ActionType): string {
       return "Lock/Release";
     case ActionType.Swap:
       return "Swap";
+    case ActionType.Bridge:
+      return "Bridge";
     default:
       return "Unknown";
   }

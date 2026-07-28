@@ -24,6 +24,7 @@ export const ActionType = {
   Sweep: 2,
   LockRelease: 3,
   Swap: 4,
+  Bridge: 5,
 } as const;
 export type ActionType = (typeof ActionType)[keyof typeof ActionType];
 
@@ -69,12 +70,29 @@ export interface Action {
   kind: ActionType;
   recipients: Address[];
   amountsOrBps: bigint[];
-  fixedAmount: bigint; // Swap: amountIn
+  fixedAmount: bigint; // Swap: amountIn; Bridge: burn amount
   sweepThreshold: bigint;
   unlockTime: bigint;
   tokenIn: Address; // Swap: token sold from the account (the pool's USDC or EURC)
   tokenOut: Address; // Swap: token bought and delivered to recipients[0]
   minAmountOut: bigint; // Swap: slippage floor
+  /** Bridge (CCTP V2): destination CCTP domain id, e.g. 0 = Ethereum Sepolia. */
+  destinationDomain: number;
+  /** Bridge: recipient on the destination chain, as bytes32 (an EVM address left-padded with zeros) — see `addressToBytes32`. */
+  mintRecipient: Hex;
+}
+
+/** Mirrors Solidity's `bytes32(0)` sentinel for `Action.mintRecipient` — unset. */
+export const MINT_RECIPIENT_UNSET: Hex = `0x${"0".repeat(64)}`;
+
+/** Left-pads an EVM address into the bytes32 CCTP expects for `mintRecipient`. */
+export function addressToBytes32(address: Address): Hex {
+  return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
+}
+
+/** Recovers the low-160-bit EVM address from a bytes32 CCTP mint recipient (or any zero-padded address-shaped bytes32). */
+export function bytes32ToAddress(value: Hex): Address {
+  return `0x${value.slice(-40)}`;
 }
 
 export interface Flow {
@@ -139,6 +157,8 @@ export const flowAbiParameter = {
         { name: "tokenIn", type: "address" },
         { name: "tokenOut", type: "address" },
         { name: "minAmountOut", type: "uint256" },
+        { name: "destinationDomain", type: "uint32" },
+        { name: "mintRecipient", type: "bytes32" },
       ],
     },
     { name: "active", type: "bool" },

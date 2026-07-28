@@ -20,7 +20,8 @@ library FlowTypes {
         Forward, // send the full/partial amount to a single recipient
         Sweep, // move balance above a threshold to a savings sub-account
         LockRelease, // time-lock an amount, released after `unlockTime`
-        Swap // swap tokenIn -> tokenOut via CanalisExecutor's configured CanalisSwapPool
+        Swap, // swap tokenIn -> tokenOut via CanalisExecutor's configured CanalisSwapPool
+        Bridge // burn USDC on Arc via CCTP V2 TokenMessengerV2; mint completes async on destinationDomain
     }
 
     /// @notice A single trigger definition attached to a flow.
@@ -66,6 +67,15 @@ library FlowTypes {
         address tokenIn; // Swap: token sold from the account (must be the pool's USDC or EURC)
         address tokenOut; // Swap: token bought and delivered to recipients[0] (the pool's other token)
         uint256 minAmountOut; // Swap: slippage floor — CanalisSwapPool.swap reverts "insufficient output" below this
+        // Bridge (CCTP V2, Arc-native feature slice, spec §7.3 #3). Uses
+        // `fixedAmount` for the burn amount (same field Forward/Split/Swap
+        // already use) — does NOT use `recipients[]`; the cross-chain
+        // recipient is `mintRecipient` below, a bytes32 (not an
+        // address[]) since CCTP's mint recipient is chain-agnostic and
+        // doesn't participate in Condition.allowedRecipients/
+        // deniedRecipients (see CanalisExecutor._checkRecipients docs).
+        uint32 destinationDomain; // Bridge: CCTP destination domain id (0 = Ethereum Sepolia)
+        bytes32 mintRecipient; // Bridge: recipient on the destination domain, as bytes32 (EVM address left-padded)
     }
 
     /// @notice A complete flow: one trigger, any number of conditions/actions.

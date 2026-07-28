@@ -30,7 +30,7 @@ contract CanalisExecutorSwapTest is Test {
         usdc = new MockERC20("USD Coin", "USDC", 6);
         eurc = new MockERC20("Euro Coin", "EURC", 6);
         pool = new CanalisSwapPool(poolOwner, address(usdc), address(eurc));
-        executor = new CanalisExecutor(address(pool), makeAddr("oracle"));
+        executor = new CanalisExecutor(address(pool), makeAddr("oracle"), makeAddr("cctpTokenMessenger"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -82,7 +82,9 @@ contract CanalisExecutorSwapTest is Test {
             unlockTime: 0,
             tokenIn: address(usdc),
             tokenOut: address(eurc),
-            minAmountOut: minAmountOut
+            minAmountOut: minAmountOut,
+            destinationDomain: 0,
+            mintRecipient: bytes32(0)
         });
         flow.actions = actions;
     }
@@ -112,12 +114,12 @@ contract CanalisExecutorSwapTest is Test {
 
     function test_Constructor_RevertsForZeroSwapPool() public {
         vm.expectRevert("CanalisExecutor: swapPool required");
-        new CanalisExecutor(address(0), makeAddr("oracle"));
+        new CanalisExecutor(address(0), makeAddr("oracle"), makeAddr("cctpTokenMessenger"));
     }
 
     function test_Constructor_RevertsForZeroOracle() public {
         vm.expectRevert("CanalisExecutor: oracle required");
-        new CanalisExecutor(makeAddr("swapPool"), address(0));
+        new CanalisExecutor(makeAddr("swapPool"), address(0), makeAddr("cctpTokenMessenger"));
     }
 
     // =======================================================================

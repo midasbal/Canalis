@@ -10,6 +10,7 @@ import {ICanalisExecutor} from "./interfaces/ICanalisExecutor.sol";
 import {CanalisAccount} from "./CanalisAccount.sol";
 import {CanalisSwapPool} from "./CanalisSwapPool.sol";
 import {IPyth, PythStructs} from "./interfaces/IPyth.sol";
+import {ITokenMessengerV2} from "./interfaces/ITokenMessengerV2.sol";
 
 /// @title CanalisExecutor
 /// @notice The single generic "money interpreter" for Canalis. Instead of
@@ -78,6 +79,18 @@ import {IPyth, PythStructs} from "./interfaces/IPyth.sol";
 /// keeping the stored price fresh is the off-chain keeper's job (see
 /// keeper/README.md), exactly like OnSchedule/OnThreshold's precondition
 /// re-checks are the keeper's job to poke, not decide.
+///
+/// ARC-NATIVE FEATURE: CCTP Bridge (spec section 7.3 #3, fifth and final
+/// slice). A `Bridge` action burns `fixedAmount` USDC on Arc via Circle's
+/// real CCTP V2 `TokenMessengerV2` (`cctpTokenMessenger`, immutable,
+/// constructor-configured like `swapPool`/`oracle`) — see `_handleBridge`.
+/// This is a BURN-ONLY action: the corresponding mint on the destination
+/// chain is a separate, asynchronous transaction (Circle's off-chain
+/// attestation service must sign the burn message first, then someone —
+/// see the standalone completion script, keeper/scripts/complete-cctp-bridge.ts
+/// — submits it to `MessageTransmitterV2.receiveMessage` on the
+/// destination chain). CanalisExecutor has no way to observe or guarantee
+/// that second leg; `executeFlow` only ever proves the burn happened here.
 contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -122,16 +135,23 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// real Pyth contract deployed on Arc testnet.
     IPyth public immutable oracle;
 
+    /// @dev Circle's real CCTP V2 TokenMessengerV2 on Arc testnet — every
+    /// Bridge action's burn routes through it (see class docs "ARC-NATIVE
+    /// FEATURE: CCTP Bridge"). Configured at construction, never hardcoded.
+    ITokenMessengerV2 public immutable cctpTokenMessenger;
+
     modifier flowExists(uint256 flowId) {
         require(_flows[flowId].owner != address(0), "CanalisExecutor: unknown flow");
         _;
     }
 
-    constructor(address swapPool_, address oracle_) {
+    constructor(address swapPool_, address oracle_, address cctpTokenMessenger_) {
         require(swapPool_ != address(0), "CanalisExecutor: swapPool required");
         require(oracle_ != address(0), "CanalisExecutor: oracle required");
+        require(cctpTokenMessenger_ != address(0), "CanalisExecutor: cctpTokenMessenger required");
         swapPool = CanalisSwapPool(swapPool_);
         oracle = IPyth(oracle_);
+        cctpTokenMessenger = ITokenMessengerV2(cctpTokenMessenger_);
     }
 
     /// @inheritdoc ICanalisExecutor
@@ -425,6 +445,11 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
     /// allowedRecipients when that list is non-empty, and must never appear
     /// in deniedRecipients. Sentinel: empty array = no restriction for that
     /// list. The reason names the offending recipient's address.
+    /// SCOPE NOTE: Bridge doesn't use `recipients[]` (its destination is
+    /// `mintRecipient`, a chain-agnostic bytes32 — see FlowTypes.Action
+    /// docs), so a Bridge action's cross-chain destination is NOT covered
+    /// by this guard this slice; use the amount-cap condition to bound a
+    /// Bridge action instead.
     function _checkRecipients(FlowTypes.Flow storage flow, FlowTypes.Condition storage condition)
         internal
         view
@@ -508,6 +533,8 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             } else if (action.kind == FlowTypes.ActionType.Swap) {
                 // Counts the amountIn actually taken from the account, not
                 // the (variable, price-dependent) amountOut delivered.
+                total += action.fixedAmount;
+            } else if (action.kind == FlowTypes.ActionType.Bridge) {
                 total += action.fixedAmount;
             }
         }
@@ -596,6 +623,8 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
             _handleLockRelease(flowId, actionIndex, account, action);
         } else if (action.kind == FlowTypes.ActionType.Swap) {
             _handleSwap(flowId, actionIndex, account, action);
+        } else if (action.kind == FlowTypes.ActionType.Bridge) {
+            _handleBridge(flowId, actionIndex, account, action);
         } else {
             revert("CanalisExecutor: unknown action type");
         }
@@ -782,5 +811,64 @@ contract CanalisExecutor is ICanalisExecutor, ReentrancyGuard {
         uint256 amountOut = swapPool.swap(tokenIn, action.fixedAmount, action.minAmountOut, recipient);
 
         emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.Swap, recipient, amountOut);
+    }
+
+    /// @dev CCTP V2 "standard transfer" defaults (see class docs "ARC-NATIVE
+    /// FEATURE: CCTP Bridge" and docs/canalis-spec.md section 7.3 #3):
+    /// `destinationCaller = bytes32(0)` (anyone may submit the mint on the
+    /// destination chain — this is the permissionless convention, not a
+    /// missing feature), `minFinalityThreshold = 2000` ("Standard", i.e.
+    /// wait for source-chain finality rather than CCTP V2's faster/riskier
+    /// "Fast Transfer" tier). `CCTP_MAX_FEE = 0` is valid specifically
+    /// because Arc testnet's TokenMessengerV2 `minFee()` is 0 at the time
+    /// this was written (confirmed via `cast call` before implementation) —
+    /// `depositForBurn` reverts if `maxFee < amount * minFee /
+    /// MIN_FEE_MULTIPLIER`, so this would need to become non-zero if Circle
+    /// ever configures a non-zero fee on this domain.
+    bytes32 private constant CCTP_DESTINATION_CALLER = bytes32(0);
+    uint256 private constant CCTP_MAX_FEE = 0;
+    uint32 private constant CCTP_MIN_FINALITY_THRESHOLD = 2000;
+
+    /// @dev Burns `action.fixedAmount` USDC on Arc via `cctpTokenMessenger`,
+    /// to be minted to `action.mintRecipient` on `action.destinationDomain`
+    /// once Circle's attestation service signs the burn message — an
+    /// asynchronous second leg entirely outside this contract's control
+    /// (see class docs). This handler only ever proves the burn.
+    ///
+    /// APPROVE-THEN-BURN MECHANISM (same shape as `_handleSwap`): pulls
+    /// `fixedAmount` USDC from `account` into THIS contract via
+    /// `executorTransfer`, then `forceApprove`s exactly that amount to
+    /// `cctpTokenMessenger` before calling `depositForBurn` — TokenMessengerV2
+    /// pulls the USDC from the executor itself (a `transferFrom`) rather
+    /// than the executor pushing it, matching CCTP V2's own interface.
+    /// `nonReentrant` on `executeFlow` covers this like every other handler.
+    ///
+    /// EVENT SHAPE: `ActionExecuted.recipient` carries `mintRecipient`
+    /// re-encoded as an `address` (its low 160 bits) — a best-effort,
+    /// UI-friendly marker for "who this was bound for", not a same-chain
+    /// transfer target (nothing was paid out on Arc to that address).
+    /// `amount` is the real amount burned.
+    function _handleBridge(uint256 flowId, uint256 actionIndex, address account, FlowTypes.Action storage action)
+        internal
+    {
+        require(action.fixedAmount > 0, "CanalisExecutor: Bridge amount must be positive");
+        require(action.mintRecipient != bytes32(0), "CanalisExecutor: Bridge mintRecipient cannot be zero");
+
+        address usdc = address(CanalisAccount(account).usdc());
+        CanalisAccount(account).executorTransfer(address(this), action.fixedAmount);
+        IERC20(usdc).forceApprove(address(cctpTokenMessenger), action.fixedAmount);
+
+        cctpTokenMessenger.depositForBurn(
+            action.fixedAmount,
+            action.destinationDomain,
+            action.mintRecipient,
+            usdc,
+            CCTP_DESTINATION_CALLER,
+            CCTP_MAX_FEE,
+            CCTP_MIN_FINALITY_THRESHOLD
+        );
+
+        address recipientMarker = address(uint160(uint256(action.mintRecipient)));
+        emit ActionExecuted(flowId, actionIndex, FlowTypes.ActionType.Bridge, recipientMarker, action.fixedAmount);
     }
 }

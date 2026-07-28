@@ -21,7 +21,7 @@ contract CanalisExecutorTest is Test {
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
-        executor = new CanalisExecutor(makeAddr("swapPool"), makeAddr("oracle"));
+        executor = new CanalisExecutor(makeAddr("swapPool"), makeAddr("oracle"), makeAddr("cctpTokenMessenger"));
         factory = new CanalisAccountFactory(address(usdc), address(executor));
 
         vm.prank(alice);
@@ -61,7 +61,9 @@ contract CanalisExecutorTest is Test {
             unlockTime: 0,
             tokenIn: address(0),
             tokenOut: address(0),
-            minAmountOut: 0
+            minAmountOut: 0,
+            destinationDomain: 0,
+            mintRecipient: bytes32(0)
         });
         flow.actions = actions;
     }
@@ -92,7 +94,9 @@ contract CanalisExecutorTest is Test {
             unlockTime: 0,
             tokenIn: address(0),
             tokenOut: address(0),
-            minAmountOut: 0
+            minAmountOut: 0,
+            destinationDomain: 0,
+            mintRecipient: bytes32(0)
         });
         flow.actions = actions;
     }
@@ -126,7 +130,9 @@ contract CanalisExecutorTest is Test {
             unlockTime: 0,
             tokenIn: address(0),
             tokenOut: address(0),
-            minAmountOut: 0
+            minAmountOut: 0,
+            destinationDomain: 0,
+            mintRecipient: bytes32(0)
         });
         flow.actions = actions;
     }
@@ -153,7 +159,9 @@ contract CanalisExecutorTest is Test {
             unlockTime: 0,
             tokenIn: address(0),
             tokenOut: address(0),
-            minAmountOut: 0
+            minAmountOut: 0,
+            destinationDomain: 0,
+            mintRecipient: bytes32(0)
         });
         flow.actions = actions;
     }

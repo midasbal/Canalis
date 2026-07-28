@@ -12,20 +12,24 @@ money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 
 > Status: a real subset of the MVP is deployed and proven end-to-end on Arc
 > testnet — all four triggers (Manual, OnSchedule, OnThreshold, OnReceive)
-> and all five actions (Forward, Split, Sweep, LockRelease, **Swap**) work
-> against a user's own on-chain account, gated by real condition guards
-> (balance floor, time window, cooldown, allow/deny recipients, amount
-> cap), a real off-chain keeper autonomously drives the caller-agnostic
-> triggers, flows can be paused/cancelled, dry-run previewed, and
-> enumerated per-owner, and a real visual builder UI is live. Swap is
-> Canalis's first Arc-native feature slice: it routes through a
-> **self-built constant-product AMM (`CanalisSwapPool`, USDC/EURC)** rather
-> than a third-party DEX — see [Status](#status) for why. A sixth condition
-> — an **oracle price condition** — is Canalis's second Arc-native feature
-> slice: it reads Pyth's real, live IPyth contract on Arc testnet (not a
-> mock), kept fresh by the off-chain keeper. Everything else (Circle
-> Wallet/Paymaster, the remaining Arc-native slices) is still stubbed. See
-> [Status](#status) for the exact, honest breakdown.
+> and all six actions (Forward, Split, Sweep, LockRelease, **Swap**,
+> **Bridge**) work against a user's own on-chain account, gated by real
+> condition guards (balance floor, time window, cooldown, allow/deny
+> recipients, amount cap, **oracle price**), a real off-chain keeper
+> autonomously drives the caller-agnostic triggers, flows can be
+> paused/cancelled, dry-run previewed, and enumerated per-owner, and a real
+> visual builder UI is live. All **five Arc-native feature slices** from
+> the internal spec (§7.3) are done: (1) Swap routes through a **self-built
+> constant-product AMM** (`CanalisSwapPool`, USDC/EURC) rather than a
+> third-party DEX; (2) an **oracle price condition** reads Pyth's real, live
+> IPyth contract on Arc testnet, kept fresh by the off-chain keeper; (3) a
+> **CCTP Bridge action** burns USDC on Arc via Circle's real CCTP V2
+> `TokenMessengerV2`, proven with a full round trip — a standalone
+> completion script picked up the real attestation and minted the USDC on
+> Ethereum Sepolia; (4) and (5) are one-click composite templates
+> (treasury-rebalance, recurring DCA) built from (1)+(2), no new on-chain
+> primitive. Everything else (Circle Wallet/Paymaster) is still stubbed.
+> See [Status](#status) for the exact, honest breakdown.
 
 ---
 
@@ -153,7 +157,8 @@ canalis/
 │   │   ├── libraries/FlowTypes.sol         # trigger/action enums, Condition/Action/Flow structs
 │   │   ├── interfaces/ICanalisExecutor.sol
 │   │   ├── interfaces/IPyth.sol            # minimal hand-written IPyth read/update interface (Arc-native feature #2)
-│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 5 actions, 6 conditions incl. oracle price, pause, preview, enumeration)
+│   │   ├── interfaces/ITokenMessengerV2.sol # minimal hand-written CCTP V2 depositForBurn interface (Arc-native feature #3)
+│   │   ├── CanalisExecutor.sol             # flows-as-data interpreter (all 4 triggers, all 6 actions incl. CCTP Bridge, 6 conditions incl. oracle price, pause, preview, enumeration)
 │   │   ├── CanalisAccount.sol              # per-user USDC vault + onlyExecutor trust boundary + depositNonce
 │   │   ├── CanalisAccountFactory.sol       # one CanalisAccount per owner, self-service
 │   │   └── CanalisSwapPool.sol             # self-built constant-product USDC/EURC AMM (Arc-native feature #1)
@@ -168,10 +173,11 @@ canalis/
 │   │   ├── CanalisExecutorPreview.t.sol    # previewFlow vs. real executeFlow, every trigger type + conditions
 │   │   ├── CanalisExecutorEnumeration.t.sol # flowsOf per-owner, in order, doesn't mix owners
 │   │   ├── CanalisExecutorSwap.t.sol       # Swap action: delivery, slippage, conditions/pause gating, previewFlow, fuzz
+│   │   ├── CanalisExecutorBridge.t.sol     # Bridge action vs. MockTokenMessengerV2: correct depositForBurn args, account debited, conditions/pause gating, previewFlow
 │   │   ├── CanalisSwapPool.t.sol           # x*y=k correctness, fee, minAmountOut, reserve accounting, fuzz
 │   │   ├── CanalisAccount.t.sol            # executorTransfer trust boundary, fuzz
 │   │   ├── CanalisAccountFactory.t.sol     # one-account-per-owner
-│   │   └── mocks/MockERC20.sol, MockPyth.sol # 6-decimal mock USDC/EURC + settable-price mock oracle for tests
+│   │   └── mocks/MockERC20.sol, MockPyth.sol, MockTokenMessengerV2.sol # 6-decimal mock USDC/EURC + settable-price mock oracle + call-recording mock CCTP messenger for tests
 │   ├── script/
 │   │   ├── Deploy.s.sol                    # deploys SwapPool + Executor + Factory + deployer's account
 │   │   ├── seed-swap-pool.sh               # owner-seeds CanalisSwapPool with USDC/EURC liquidity
@@ -188,19 +194,23 @@ canalis/
 │   │   ├── prove-pause.sh                  # live-testnet proof: pause blocks execution, unpause restores it
 │   │   ├── prove-preview.sh                # live-testnet proof: previewFlow matches a real executeFlow call
 │   │   ├── prove-flowsof.sh                # live-testnet proof: flowsOf lists the owner's registered flow ids
-│   │   └── prove-oracle-condition.sh       # live-testnet proof: real Pyth price update + block-then-allow oracle condition
+│   │   ├── prove-oracle-condition.sh       # live-testnet proof: real Pyth price update + block-then-allow oracle condition
+│   │   └── prove-cctp-bridge.sh            # live-testnet proof: real CCTP V2 burn (DepositForBurn/MessageSent events, account debited)
 │   └── .env.example                        # RPC_URL / PRIVATE_KEY placeholders
 ├── keeper/                         # standalone Node/TS + viem keeper service
 │   ├── src/
 │   │   ├── index.ts                        # poll loop: flowsOf + previewFlow (getLogs-free), poke executeFlow, refresh stale oracle prices, tolerate reverts
 │   │   ├── abi.ts / chain.ts / config.ts    # minimal executor + IPyth ABI, Arc testnet chain def, env config
-│   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / CANALIS_ACCOUNT / KEEPER_PRIVATE_KEY / ORACLE_ADDRESS / HERMES_URL / POLL_INTERVAL_MS
+│   ├── scripts/
+│   │   └── complete-cctp-bridge.ts         # standalone: polls Circle's real attestation API, completes the mint on Ethereum Sepolia
+│   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / CANALIS_ACCOUNT / KEEPER_PRIVATE_KEY / ORACLE_ADDRESS / HERMES_URL / POLL_INTERVAL_MS / SEPOLIA_RPC_URL / SEPOLIA_PRIVATE_KEY
 └── web/                            # Vite + React + TS frontend
     ├── src/
     │   ├── chains.ts / wagmi.ts             # Arc testnet chain + rate-limit-aware wagmi transport
     │   ├── lib/
     │   │   ├── flows.ts                     # TS mirror of the Solidity flow model + encode/decode
     │   │   ├── oracleFeeds.ts                # curated real Pyth feed id catalog (production Hermes ids)
+    │   │   ├── bridgeDestinations.ts          # curated CCTP V2 destination-chain catalog (Ethereum Sepolia)
     │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above (incl. CanalisSwapPool, IPyth)
     │   │   ├── composer.ts                  # composer draft state -> Flow, validation
     │   │   ├── flowSummary.ts               # plain-English flow/action summaries
@@ -274,8 +284,17 @@ canalis/
   delivers the output directly to a recipient address named in the
   action — `CanalisAccount` stays USDC-only, it doesn't custody the
   swapped-out token — and enforces `minAmountOut` slippage protection at
-  the pool level). All five proven with real transactions on Arc testnet
-  (see `contracts/script/prove-*.sh`).
+  the pool level), and **`Bridge`** (Canalis's third Arc-native feature —
+  burns `fixedAmount` USDC on Arc via Circle's real CCTP V2
+  `TokenMessengerV2`, to be minted to `mintRecipient` on
+  `destinationDomain` once Circle's off-chain attestation service signs
+  the burn message; same approve-then-call shape as `Swap`. This is a
+  burn-ONLY action — the mint is a separate, asynchronous transaction on
+  the destination chain, completed by a standalone script, not
+  `CanalisExecutor` itself). All six proven with real transactions on Arc
+  testnet (see `contracts/script/prove-*.sh`); `Bridge` additionally
+  proven with a full burn-to-mint round trip across two real chains — see
+  below.
 - Conditions (all 5 guard fields): **balance floor** (`minBalance`),
   **time window** (`windowStart`/`windowEnd`, each independently
   open-ended), **cooldown** (`cooldownSeconds`, measured from
@@ -302,6 +321,20 @@ canalis/
   oracle: a flow whose threshold the current real price BLOCKS, then the
   same flow with a threshold the price satisfies, ALLOWS
   (`contracts/script/prove-oracle-condition.sh`).
+- **CCTP V2 Bridge** — Canalis's third and final Arc-native feature slice
+  (see `Bridge` action above). Fee/finality defaults for a CCTP V2
+  "standard transfer": `destinationCaller = bytes32(0)` (permissionless),
+  `minFinalityThreshold = 2000`, `maxFee = 0` (Arc testnet's live `minFee`
+  is 0). Proven live in two stages: (1) the burn —
+  `contracts/script/prove-cctp-bridge.sh` registers and executes a Manual +
+  Bridge flow burning 1 USDC to Ethereum Sepolia, asserts the
+  `CanalisAccount` was debited by exactly the burn amount, and decodes the
+  real `DepositForBurn`/`MessageSent` events from the receipt; (2) the
+  mint — `keeper/scripts/complete-cctp-bridge.ts` polled Circle's real
+  testnet attestation API for that burn (ready within seconds), then
+  submitted `MessageTransmitterV2.receiveMessage` on Ethereum Sepolia — the
+  recipient's real Sepolia USDC balance went from `0` to `1000000`
+  (1.000000 USDC). A genuine two-chain proof, not just a burn.
 - A real off-chain **keeper** (`keeper/`, Node/TS + viem) — **entirely
   `getLogs`-free**: discovers a configured `CanalisAccount`'s flows via
   `flowsOf` (one `eth_call`), dry-runs each via `previewFlow`, and pokes
@@ -356,16 +389,17 @@ canalis/
   transaction. Proven live on Arc testnet: swap output matches the pool's
   own quote exactly, reserves move by exactly the swap amounts
   (`contracts/script/prove-swap-flow.sh`).
-- Foundry test suite: **186 passing tests** (17 fuzz tests, 256 runs each)
+- Foundry test suite: **200 passing tests** (17 fuzz tests, 256 runs each)
   across `CanalisExecutor`, its condition guards (including the oracle
-  price condition against a `MockPyth`), its triggers, its LockRelease
-  and Swap actions, pause, enriched events, preview, per-owner
-  enumeration, `CanalisSwapPool`, `CanalisAccount`, and
-  `CanalisAccountFactory`.
+  price condition against a `MockPyth`), its triggers, its LockRelease,
+  Swap, and Bridge actions (the latter against a `MockTokenMessengerV2`),
+  pause, enriched events, preview, per-owner enumeration, `CanalisSwapPool`,
+  `CanalisAccount`, and `CanalisAccountFactory`.
 - Frontend: a real visual flow **composer** (stepper: trigger → conditions
   → actions, including a Swap block with a live pool-quote-driven
-  slippage control, and an oracle price condition block showing the live
-  Pyth price for the selected feed), a **deployed-flows list** with
+  slippage control, an oracle price condition block showing the live
+  Pyth price for the selected feed, and a Bridge block for burning USDC to
+  Ethereum Sepolia via CCTP V2), a **deployed-flows list** with
   pause/resume and run-now (both real transactions, guarded against
   double-submit, with decoded on-chain revert reasons), live
   `previewFlow`-backed status per flow, and a **run log** built from real
@@ -380,8 +414,8 @@ canalis/
 
 - Circle Wallet onboarding and Gas Station/Paymaster sponsorship — no
   Circle SDK integration; wagmi uses a plain injected connector.
-- The remaining Arc-native feature slices (CCTP action, treasury-rebalance
-  and DCA composite templates) — see `docs/canalis-spec.md` §7.3.
+- All five Arc-native feature slices from `docs/canalis-spec.md` §7.3 are
+  now done.
 
 ## Getting started
 

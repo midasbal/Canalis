@@ -13,6 +13,7 @@ import {
 import { canalisSwapPoolAbi } from "../../lib/abi";
 import { CANALIS_SWAP_POOL_ADDRESS } from "../../lib/contracts";
 import { USDC_DECIMALS } from "../../lib/format";
+import { BRIDGE_DESTINATIONS } from "../../lib/bridgeDestinations";
 import { AddressField, AmountField, Field, RemoveButton } from "./inputs";
 
 const ACTION_KINDS: ActionType[] = [
@@ -21,6 +22,7 @@ const ACTION_KINDS: ActionType[] = [
   ActionType.Sweep,
   ActionType.LockRelease,
   ActionType.Swap,
+  ActionType.Bridge,
 ];
 
 interface ActionsSectionProps {
@@ -130,6 +132,51 @@ function ActionCard({
       )}
 
       {action.kind === ActionType.Swap && <SwapEditor action={action} onChange={onChange} />}
+
+      {action.kind === ActionType.Bridge && <BridgeEditor action={action} onChange={onChange} />}
+    </div>
+  );
+}
+
+/**
+ * Bridge via Circle's real CCTP V2 (Arc-native feature slice, spec section
+ * 7.3 #3 — see CanalisExecutor.sol's "ARC-NATIVE FEATURE: CCTP Bridge"
+ * docs). Burns USDC on Arc; the mint on the destination chain is a
+ * SEPARATE, asynchronous transaction (Circle's attestation service has to
+ * sign the burn message first) — this composer only ever builds the burn
+ * leg, honestly, with no promise of when or whether the mint follows.
+ */
+function BridgeEditor({ action, onChange }: { action: ComposerAction; onChange: (patch: Partial<ComposerAction>) => void }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          <span className="mb-1 block text-ink-muted">Destination chain</span>
+          <select
+            value={action.bridgeDestinationKey}
+            onChange={(e) => onChange({ bridgeDestinationKey: e.target.value })}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink"
+          >
+            {BRIDGE_DESTINATIONS.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <AmountField label="Amount to bridge (USDC)" value={action.bridgeAmount} onChange={(e) => onChange({ bridgeAmount: e.target.value })} />
+      </div>
+
+      <AddressField
+        label="Recipient on the destination chain"
+        value={action.bridgeRecipient}
+        onChange={(e) => onChange({ bridgeRecipient: e.target.value })}
+      />
+
+      <p className="text-xs text-ink-faint">
+        Burns USDC on Arc via Circle's real CCTP V2. The mint on the destination chain completes separately, once Circle's
+        attestation service signs the burn — it isn't part of this transaction and can take a few minutes.
+      </p>
     </div>
   );
 }
