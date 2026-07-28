@@ -5,7 +5,7 @@ import { CANALIS_EURC_ADDRESS, CANALIS_USDC_ADDRESS } from "./contracts";
 import { oracleFeedByPriceId } from "./oracleFeeds";
 
 /** Resolves a token address to a readable symbol where known (USDC/EURC), else a shortened address. */
-function tokenSymbol(address: string): string {
+export function tokenSymbol(address: string): string {
   if (CANALIS_USDC_ADDRESS && address.toLowerCase() === CANALIS_USDC_ADDRESS.toLowerCase()) return "USDC";
   if (CANALIS_EURC_ADDRESS && address.toLowerCase() === CANALIS_EURC_ADDRESS.toLowerCase()) return "EURC";
   return shortAddress(address);

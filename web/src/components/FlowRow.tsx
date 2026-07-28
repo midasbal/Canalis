@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Address } from "viem";
-import { useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { useReadContract, usePublicClient, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { Card } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { canalisExecutorAbi } from "../lib/abi";
-import { CANALIS_EXECUTOR_ADDRESS } from "../lib/contracts";
-import { SCHEDULE_NEVER_AGAIN, TriggerType, type Flow } from "../lib/flows";
+import { canalisExecutorAbi, pythAbi } from "../lib/abi";
+import { CANALIS_EXECUTOR_ADDRESS, CANALIS_ORACLE_ADDRESS } from "../lib/contracts";
+import { PRICE_ID_UNSET, SCHEDULE_NEVER_AGAIN, TriggerType, type Flow } from "../lib/flows";
+import { fetchHermesUpdate } from "../lib/oracleRefresh";
 import { arcscanTxUrl, formatCountdown } from "../lib/format";
 import { getRevertReason } from "../lib/errors";
 import { summarizeFlow, triggerTypeLabel } from "../lib/flowSummary";
@@ -60,9 +61,22 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
     refetchPreview();
   }, [previewRefreshTick, refetchPreview]);
 
+  const publicClient = usePublicClient();
+
   const pauseTx = useWriteContract();
   const pauseReceipt = useWaitForTransactionReceipt({ hash: pauseTx.data });
   const pausingRef = useRef(false);
+
+  // Oracle price refresh (Arc-native feature, spec section 7.3 #2): a
+  // "Run now" on a flow with a price condition needs the on-chain Pyth
+  // price to be fresh, but only the keeper normally pushes updates (see
+  // keeper/README.md "Oracle price updates"). Mirrors the keeper's own
+  // fetch-Hermes -> updatePriceFeeds step so a manual run doesn't just
+  // revert "oracle price stale". Separate write hook from `runTx` so a
+  // refresh failure/pending-state doesn't get confused with executeFlow's.
+  const refreshPriceTx = useWriteContract();
+  const [runStep, setRunStep] = useState<"idle" | "refreshing" | "running">("idle");
+  const [runStepError, setRunStepError] = useState<unknown>(null);
 
   const runTx = useWriteContract();
   const runReceipt = useWaitForTransactionReceipt({ hash: runTx.data });
@@ -114,7 +128,12 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
   // narrower `Flow` type (lib/flows.ts) that the rest of the app shares.
   const flow = flowQuery.data as unknown as Flow;
   const pausing = pauseTx.isPending || pauseReceipt.isLoading;
-  const running = runTx.isPending || runReceipt.isLoading;
+  const running = runStep !== "idle" || runTx.isPending || runReceipt.isLoading;
+
+  // Every distinct oracle price feed this flow's conditions reference —
+  // empty for the common case (no oracle condition), so "Run now" stays a
+  // single executeFlow call exactly as before for those flows.
+  const oraclePriceIds = [...new Set(flow.conditions.map((c) => c.priceId).filter((id) => id !== PRICE_ID_UNSET))];
 
   async function handleToggleActive() {
     if (!CANALIS_EXECUTOR_ADDRESS || pausingRef.current) return;
@@ -138,17 +157,53 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
   async function handleRunNow() {
     if (!CANALIS_EXECUTOR_ADDRESS || runningRef.current) return;
     runningRef.current = true;
+    setRunStepError(null);
     try {
+      if (oraclePriceIds.length > 0) {
+        // Oracle-conditioned flow: only the keeper normally keeps the
+        // on-chain price fresh (see keeper/README.md), so a manual run
+        // refreshes it itself first — same fetch-Hermes ->
+        // getUpdateFee -> updatePriceFeeds steps the keeper takes, just
+        // triggered by this click instead of a poll. If any of this
+        // fails, executeFlow is never called — surfacing a stale/failed
+        // refresh honestly rather than trying (and reverting) anyway.
+        if (!CANALIS_ORACLE_ADDRESS || !publicClient) {
+          throw new Error("Oracle not configured (VITE_ORACLE_ADDRESS) — can't refresh the price.");
+        }
+        setRunStep("refreshing");
+        const updateData = await fetchHermesUpdate(oraclePriceIds);
+        const fee = await publicClient.readContract({
+          address: CANALIS_ORACLE_ADDRESS,
+          abi: pythAbi,
+          functionName: "getUpdateFee",
+          args: [updateData],
+        });
+        const updateHash = await refreshPriceTx.writeContractAsync({
+          address: CANALIS_ORACLE_ADDRESS,
+          abi: pythAbi,
+          functionName: "updatePriceFeeds",
+          args: [updateData],
+          value: fee,
+        });
+        await publicClient.waitForTransactionReceipt({ hash: updateHash });
+      }
+
+      setRunStep("running");
       await runTx.writeContractAsync({
         address: CANALIS_EXECUTOR_ADDRESS,
         abi: canalisExecutorAbi,
         functionName: "executeFlow",
         args: [flowId],
       });
-    } catch {
-      // Surfaced via runTx.error below.
+    } catch (err) {
+      // Covers a failed Hermes fetch, a rejected/reverted updatePriceFeeds,
+      // or a failed/rejected executeFlow — surfaced below via runStepError
+      // (own state, not just runTx.error, since the refresh step uses a
+      // separate write hook).
+      setRunStepError(err);
     } finally {
       runningRef.current = false;
+      setRunStep("idle");
     }
   }
 
@@ -179,7 +234,7 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
             disabled={running || pausing}
             className="rounded-lg bg-action px-3 py-1.5 text-xs font-medium text-white transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {running ? "Running…" : "Run now"}
+            {runStep === "refreshing" ? "Refreshing price…" : running ? "Running…" : "Run now"}
           </button>
         </div>
       </div>
@@ -209,16 +264,26 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
         )}
       </div>
 
-      {(pauseTx.error || runTx.error) && (
-        <p className="mt-2 text-xs text-red-400">{getRevertReason(pauseTx.error ?? runTx.error)}</p>
+      {Boolean(pauseTx.error || runStepError) && (
+        <p className="mt-2 text-xs text-red-400">{getRevertReason(pauseTx.error ?? runStepError)}</p>
       )}
 
+      {refreshPriceTx.data && (
+        <a
+          href={arcscanTxUrl(refreshPriceTx.data)}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-block text-xs text-accent-strong underline underline-offset-2"
+        >
+          View oracle price refresh on arcscan
+        </a>
+      )}
       {runReceipt.isSuccess && runReceipt.data && (
         <a
           href={arcscanTxUrl(runReceipt.data.transactionHash)}
           target="_blank"
           rel="noreferrer"
-          className="mt-2 inline-block text-xs text-accent-strong underline underline-offset-2"
+          className="mt-2 ml-3 inline-block text-xs text-accent-strong underline underline-offset-2"
         >
           View run on arcscan
         </a>

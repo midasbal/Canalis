@@ -159,7 +159,13 @@ function SwapEditor({ action, onChange }: { action: ComposerAction; onChange: (p
     abi: canalisSwapPoolAbi,
     functionName: "quote",
     args: tokenIn && parsedAmountIn ? [tokenIn, parsedAmountIn] : undefined,
-    query: { enabled: Boolean(CANALIS_SWAP_POOL_ADDRESS && tokenIn && parsedAmountIn && parsedAmountIn > 0n) },
+    // Reserves can change underneath a mounted composer (e.g. the pool
+    // gets re-seeded, or another swap runs) — poll like the oracle price
+    // display does, so a stale quote never sits there looking current.
+    query: {
+      enabled: Boolean(CANALIS_SWAP_POOL_ADDRESS && tokenIn && parsedAmountIn && parsedAmountIn > 0n),
+      refetchInterval: 15_000,
+    },
   });
 
   const quote = quoteQuery.data;

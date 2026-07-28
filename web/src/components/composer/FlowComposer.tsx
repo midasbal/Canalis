@@ -33,6 +33,7 @@ export function FlowComposer() {
   const { accountAddress, hasAccount, isLoading: accountLoading } = useCanalisAccount();
 
   const [draft, setDraft] = useState<ComposerDraft>(defaultDraft());
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [registeredFlowId, setRegisteredFlowId] = useState<bigint | null>(null);
 
   const registerFlow = useWriteContract();
@@ -108,6 +109,7 @@ export function FlowComposer() {
 
   function handleReset() {
     setDraft(defaultDraft());
+    setSelectedTemplateId(null);
     setRegisteredFlowId(null);
     registerFlow.reset();
   }
@@ -115,7 +117,20 @@ export function FlowComposer() {
   return (
     <div className="flex flex-col gap-6">
       <Card eyebrow="Templates" title="Start from a template (optional)">
-        <TemplatePicker onPick={(picked) => setDraft(picked)} />
+        <TemplatePicker
+          selectedId={selectedTemplateId}
+          onPick={(picked, templateId) => {
+            if (templateId === selectedTemplateId) {
+              // Clicking the already-selected template again toggles it
+              // off — same as hitting Reset, not just clearing the
+              // highlight while leaving the pre-filled draft behind.
+              handleReset();
+              return;
+            }
+            setDraft(picked);
+            setSelectedTemplateId(templateId);
+          }}
+        />
       </Card>
 
       <Card eyebrow="Build a flow" title="Compose trigger → conditions → actions">

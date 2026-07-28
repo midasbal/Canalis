@@ -1,4 +1,5 @@
-import { useAccount, useReadContract } from "wagmi";
+import { useMemo } from "react";
+import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import { Card } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { EmptyState } from "./ui/EmptyState";
@@ -7,8 +8,9 @@ import { CreateCanalisAccountPrompt } from "./CreateCanalisAccountPrompt";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
 import { useRunLog, type RunLogEntry } from "../lib/useRunLog";
 import { canalisExecutorAbi } from "../lib/abi";
+import { ActionType, type Flow } from "../lib/flows";
 import { arcscanAddressUrl, arcscanTxUrl, formatTimestamp, formatUsdc, shortAddress } from "../lib/format";
-import { actionTypeLabel } from "../lib/flowSummary";
+import { actionTypeLabel, tokenSymbol } from "../lib/flowSummary";
 import { getRevertReason } from "../lib/errors";
 import { CANALIS_EXECUTOR_ADDRESS } from "../lib/contracts";
 
@@ -39,6 +41,41 @@ export function RunLog() {
   });
 
   const { entries, hydrated, historyError, partial, retryHistory, toasts, dismissToast } = useRunLog(walletAddress, flowIdsQuery.data);
+
+  // Swap's ActionExecuted.amount is denominated in `tokenOut` (EURC when
+  // swapping USDC->EURC, USDC the other direction) — every other action
+  // type only ever moves USDC (CanalisAccount is USDC-only). Resolving the
+  // real unit needs each flow's own definition (`getFlow`), not a hardcoded
+  // "USDC" label — see RunLogRow below.
+  const flowIds = flowIdsQuery.data ?? [];
+  const flowsQuery = useReadContracts({
+    contracts: flowIds.map(
+      (flowId) =>
+        ({
+          address: CANALIS_EXECUTOR_ADDRESS,
+          abi: canalisExecutorAbi,
+          functionName: "getFlow",
+          args: [flowId],
+        }) as const,
+    ),
+    query: { enabled: flowIds.length > 0 },
+  });
+
+  const swapOutputTokenByAction = useMemo(() => {
+    const map = new Map<string, string>();
+    flowIds.forEach((flowId, i) => {
+      const result = flowsQuery.data?.[i];
+      if (!result || result.status !== "success") return;
+      const flow = result.result as Flow;
+      flow.actions.forEach((action, actionIndex) => {
+        if (action.kind === ActionType.Swap) {
+          map.set(`${flowId.toString()}-${actionIndex}`, tokenSymbol(action.tokenOut));
+        }
+      });
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowIds, flowsQuery.data]);
 
   if (!CONTRACTS_CONFIGURED) {
     return (
@@ -125,7 +162,7 @@ export function RunLog() {
           ) : (
             <div className="flex flex-col gap-3">
               {entries.map((entry) => (
-                <RunLogRow key={`${entry.txHash}-${entry.flowId}`} entry={entry} />
+                <RunLogRow key={`${entry.txHash}-${entry.flowId}`} entry={entry} swapOutputTokenByAction={swapOutputTokenByAction} />
               ))}
             </div>
           )}
@@ -135,7 +172,7 @@ export function RunLog() {
   );
 }
 
-function RunLogRow({ entry }: { entry: RunLogEntry }) {
+function RunLogRow({ entry, swapOutputTokenByAction }: { entry: RunLogEntry; swapOutputTokenByAction: Map<string, string> }) {
   return (
     <div className="rounded-xl border border-border-soft bg-surface/50 p-4">
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -168,24 +205,35 @@ function RunLogRow({ entry }: { entry: RunLogEntry }) {
         <p className="text-xs text-ink-faint">No action detail on this transaction.</p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {entry.actions.map((action) => (
-            <li key={action.logKey} className="flex items-center gap-2 text-sm">
-              <span className="rounded-md border border-action/30 bg-action-soft px-1.5 py-0.5 text-[11px] font-medium text-action">
-                {actionTypeLabel(action.kind)}
-              </span>
-              <span className="text-ink">
-                {formatUsdc(action.amount)} USDC →{" "}
-                <a
-                  href={arcscanAddressUrl(action.recipient)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono underline underline-offset-2"
-                >
-                  {shortAddress(action.recipient)}
-                </a>
-              </span>
-            </li>
-          ))}
+          {entry.actions.map((action) => {
+            // Every action type except Swap only ever moves USDC
+            // (CanalisAccount is USDC-only) — Swap's real output token is
+            // whatever the flow's own action.tokenOut is (e.g. EURC for a
+            // USDC->EURC swap), resolved from the real on-chain flow
+            // definition rather than assumed.
+            const unit =
+              action.kind === ActionType.Swap
+                ? (swapOutputTokenByAction.get(`${entry.flowId.toString()}-${action.actionIndex.toString()}`) ?? "…")
+                : "USDC";
+            return (
+              <li key={action.logKey} className="flex items-center gap-2 text-sm">
+                <span className="rounded-md border border-action/30 bg-action-soft px-1.5 py-0.5 text-[11px] font-medium text-action">
+                  {actionTypeLabel(action.kind)}
+                </span>
+                <span className="text-ink">
+                  {formatUsdc(action.amount)} {unit} →{" "}
+                  <a
+                    href={arcscanAddressUrl(action.recipient)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono underline underline-offset-2"
+                  >
+                    {shortAddress(action.recipient)}
+                  </a>
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

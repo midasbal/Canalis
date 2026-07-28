@@ -1,5 +1,5 @@
 import { ActionType, TriggerType } from "./flows";
-import { emptyAction, newSplitRecipientRow, type ComposerDraft } from "./composer";
+import { emptyAction, emptyCondition, newSplitRecipientRow, type ComposerDraft } from "./composer";
 
 /**
  * One-click starting points for the composer (Stage 4). Each produces a
@@ -62,6 +62,58 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         trigger: { kind: TriggerType.OnSchedule, scheduleMode: "now", scheduleAt: "", intervalSeconds: "86400", thresholdAmount: "" },
         conditions: [],
         actions: [action],
+      };
+    },
+  },
+  {
+    id: "recurring-dca",
+    name: "Recurring DCA",
+    description: "Every few minutes, if EUR/USD is below a threshold, swap USDC into EURC.",
+    build: () => {
+      const condition = emptyCondition("oraclePrice");
+      condition.oracleFeedKey = "EURUSD";
+      condition.oracleDirection = "below";
+      condition.oracleThreshold = "1.15";
+      condition.oracleMaxStalenessSeconds = "300";
+
+      const action = emptyAction(ActionType.Swap);
+      action.swapTokenIn = "USDC";
+      action.swapAmountIn = "5";
+
+      return {
+        trigger: { kind: TriggerType.OnSchedule, scheduleMode: "now", scheduleAt: "", intervalSeconds: "300", thresholdAmount: "" },
+        conditions: [condition],
+        actions: [action],
+      };
+    },
+  },
+  {
+    id: "treasury-rebalance",
+    name: "Treasury rebalance",
+    description: "If EUR/USD is above a threshold, swap some USDC to EURC and split the rest 50/50.",
+    build: () => {
+      const condition = emptyCondition("oraclePrice");
+      condition.oracleFeedKey = "EURUSD";
+      condition.oracleDirection = "above";
+      condition.oracleThreshold = "1.10";
+      condition.oracleMaxStalenessSeconds = "300";
+
+      const swapAction = emptyAction(ActionType.Swap);
+      swapAction.swapTokenIn = "USDC";
+      swapAction.swapAmountIn = "10";
+
+      const splitAction = emptyAction(ActionType.Split);
+      splitAction.splitTotal = "50";
+      const r1 = newSplitRecipientRow();
+      r1.bps = "5000";
+      const r2 = newSplitRecipientRow();
+      r2.bps = "5000";
+      splitAction.splitRecipients = [r1, r2];
+
+      return {
+        trigger: { kind: TriggerType.Manual, scheduleMode: "now", scheduleAt: "", intervalSeconds: "", thresholdAmount: "" },
+        conditions: [condition],
+        actions: [swapAction, splitAction],
       };
     },
   },

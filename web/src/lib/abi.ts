@@ -187,7 +187,13 @@ export const canalisSwapPoolAbi = [
   },
 ] as const;
 
-/** Minimal IPyth subset — just the live-price read the composer displays next to an oracle condition. */
+/**
+ * Minimal IPyth subset: `getPriceUnsafe` for the composer's live-price
+ * display, plus `updatePriceFeeds`/`getUpdateFee` so a manual "Run now" on
+ * an oracle-conditioned flow can refresh the on-chain price itself before
+ * executing — mirrors keeper/src/abi.ts's identical subset, which does the
+ * same thing for the keeper's automated poll.
+ */
 export const pythAbi = [
   {
     type: "function",
@@ -206,6 +212,20 @@ export const pythAbi = [
         ],
       },
     ],
+  },
+  {
+    type: "function",
+    name: "updatePriceFeeds",
+    stateMutability: "payable",
+    inputs: [{ name: "updateData", type: "bytes[]" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "getUpdateFee",
+    stateMutability: "view",
+    inputs: [{ name: "updateData", type: "bytes[]" }],
+    outputs: [{ name: "feeAmount", type: "uint256" }],
   },
 ] as const;
 
