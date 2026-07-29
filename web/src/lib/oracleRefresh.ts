@@ -26,3 +26,34 @@ export async function fetchHermesUpdate(priceIds: Hex[]): Promise<Hex[]> {
   const body = (await res.json()) as { binary: { data: string[] } };
   return body.binary.data.map((hex) => (hex.startsWith("0x") ? (hex as Hex) : (`0x${hex}` as Hex)));
 }
+
+export interface HermesPrice {
+  /** Real USD value, already rescaled by the feed's own expo. */
+  usd: number;
+  /** Unix seconds Hermes says this price was published. */
+  publishTime: number;
+}
+
+/**
+ * Fetches the current PARSED price for a single feed straight from Pyth's
+ * production Hermes API — a plain, read-only, no-wallet-needed call. Used
+ * by the landing's live price badge so the number reflects the real-time
+ * market price Hermes is serving right now, not whatever was last pushed
+ * on-chain (which only updates when the keeper runs, and can go stale if
+ * it isn't). Throws on any non-2xx response or a missing/malformed body
+ * rather than returning something that looks like a price but isn't.
+ */
+export async function fetchHermesPrice(priceId: Hex): Promise<HermesPrice> {
+  const res = await fetch(`${HERMES_URL}/v2/updates/price/latest?ids[]=${priceId}&parsed=true`);
+  if (!res.ok) {
+    throw new Error(`Hermes request failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as {
+    parsed?: { price: { price: string; expo: number; publish_time: number } }[];
+  };
+  const parsed = body.parsed?.[0]?.price;
+  if (!parsed) {
+    throw new Error("Hermes response had no parsed price");
+  }
+  return { usd: Number(parsed.price) * 10 ** parsed.expo, publishTime: parsed.publish_time };
+}

@@ -2,7 +2,195 @@
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+  /*
+   * Canalis design system v2 ("brand-*" tokens) — a classical/editorial dark
+   * theme, introduced with the pre-connect landing page and meant to
+   * propagate to the rest of the app in a later polish pass. Deliberately a
+   * SEPARATE namespace from the existing --color-canvas/-accent/-ink/etc.
+   * tokens above (still used by the connected app — Header, Builder,
+   * Dashboard) so this doesn't change anything already shipped. New
+   * surfaces should reach for these; a future pass can retire the old
+   * tokens once every view has migrated.
+   */
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+
+  --color-brand-base: #0e1217; /* base slate canvas */
+  --color-brand-base-alt: #12161c; /* secondary base, slightly lifted */
+  --color-brand-surface: #1a2029; /* raised surface (cards, panels) */
+  --color-brand-bronze: #c6a15b; /* warm classical accent — hairlines, channel motif, small detail */
+  --color-brand-violet: #9b7bff; /* single disciplined value-accent — CTAs, links, flow glow */
+  --color-brand-violet-soft: #b79ce0; /* softer violet for glow/ambient use, never a gradient wash */
+  --color-brand-ink: #ece6db; /* warm off-white body/heading text */
+  --color-brand-muted: #8a93a1; /* muted secondary text */
+
+  --animate-channel-flow: channel-flow 5s linear infinite;
+  --animate-glow-pulse: glow-pulse 3.2s ease-in-out infinite;
+
+  @keyframes channel-flow {
+    to {
+      stroke-dashoffset: -64;
+    }
+  }
+  @keyframes glow-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /*
+   * "Watch a flow run" centerpiece (FlowRunAnimation.tsx) — one shared 8s
+   * loop duration across every piece below (main token, gate glow, the two
+   * post-split branch tokens, the two destination pings) so they all stay
+   * in lockstep automatically without any JS timing coordination; each
+   * keyframe just claims its own slice of the same 0-100% cycle.
+   */
+  --animate-flow-token-main: flow-token-main 8s ease-in-out infinite;
+  --animate-flow-gate-glow: flow-gate-glow 8s ease-in-out infinite;
+  --animate-flow-token-a: flow-token-branch-a 8s ease-in-out infinite;
+  --animate-flow-token-b: flow-token-branch-b 8s ease-in-out infinite;
+  --animate-flow-ping: flow-ping 8s ease-in-out infinite;
+
+  @keyframes flow-token-main {
+    0% {
+      transform: translateX(0);
+      opacity: 0;
+    }
+    4% {
+      opacity: 1;
+    }
+    38% {
+      transform: translateX(180px);
+      opacity: 1;
+    }
+    43% {
+      transform: translateX(180px);
+      opacity: 0;
+    }
+    100% {
+      transform: translateX(180px);
+      opacity: 0;
+    }
+  }
+  @keyframes flow-gate-glow {
+    0%,
+    24% {
+      opacity: 0.25;
+      transform: scale(1);
+    }
+    32% {
+      opacity: 0.95;
+      transform: scale(1.25);
+    }
+    40% {
+      opacity: 0.35;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0.25;
+      transform: scale(1);
+    }
+  }
+  @keyframes flow-token-branch-a {
+    0%,
+    41% {
+      transform: translate(0, 0);
+      opacity: 0;
+    }
+    44% {
+      opacity: 1;
+    }
+    68% {
+      transform: translate(160px, -45px);
+      opacity: 1;
+    }
+    74% {
+      transform: translate(160px, -45px);
+      opacity: 0;
+    }
+    100% {
+      transform: translate(160px, -45px);
+      opacity: 0;
+    }
+  }
+  @keyframes flow-token-branch-b {
+    0%,
+    41% {
+      transform: translate(0, 0);
+      opacity: 0;
+    }
+    44% {
+      opacity: 1;
+    }
+    68% {
+      transform: translate(160px, 45px);
+      opacity: 1;
+    }
+    74% {
+      transform: translate(160px, 45px);
+      opacity: 0;
+    }
+    100% {
+      transform: translate(160px, 45px);
+      opacity: 0;
+    }
+  }
+  @keyframes flow-ping {
+    0%,
+    66% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    72% {
+      opacity: 0.9;
+      transform: scale(1.4);
+    }
+    82% {
+      opacity: 0;
+      transform: scale(1.8);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+  }
+
+  /*
+   * Round-4 atmosphere (AmbientMotes.tsx, Hero.tsx's mist). Both are
+   * intentionally long/slow (30-40s+) and small-amplitude so they read as
+   * "barely alive," never as a busy moving background. Per-instance
+   * variation (amplitude, duration, delay) comes from inline style
+   * overrides on top of these shared base tokens, same technique as the
+   * flow-run animation's shared-duration pattern above.
+   */
+  --animate-mote-drift: mote-drift 40s ease-in-out infinite;
+  --animate-mist-drift: mist-drift 32s ease-in-out infinite;
+
+  @keyframes mote-drift {
+    0%,
+    100% {
+      transform: translate(0, 0);
+    }
+    50% {
+      transform: translate(var(--mote-dx, 14px), var(--mote-dy, -14px));
+    }
+  }
+  @keyframes mist-drift {
+    0%,
+    100% {
+      transform: translateX(0) scale(1);
+      opacity: 0.18;
+    }
+    50% {
+      transform: translateX(3%) scale(1.04);
+      opacity: 0.26;
+    }
+  }
 
   /* Canalis brand: deep slate canvas, violet "channel" accent. */
   --color-canvas: #0a0b0f;
@@ -60,5 +248,21 @@
     background-image: radial-gradient(circle at 12% 0%, color-mix(in oklab, var(--color-accent) 14%, transparent), transparent 45%),
       radial-gradient(circle at 88% 15%, color-mix(in oklab, var(--color-trigger) 10%, transparent), transparent 40%);
     background-attachment: fixed;
+  }
+
+  /* Every animation in this file (existing fade/rise-in, and the landing's
+     channel-flow/glow-pulse) is decorative, never load-bearing — honor
+     prefers-reduced-motion by freezing on the animation's resting frame
+     instead of disabling opacity transitions entirely (nothing should stay
+     invisible). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
