@@ -400,6 +400,16 @@ canalis/
   transaction. Proven live on Arc testnet: swap output matches the pool's
   own quote exactly, reserves move by exactly the swap amounts
   (`contracts/script/prove-swap-flow.sh`).
+  **Liquidity, plainly:** every Swap is a real, on-chain swap against this
+  pool's real, owner-seeded reserves (~80/80 USDC/EURC as seeded, drifting
+  with every swap) — not a mock. It's a small, self-seeded pool, not deep
+  public liquidity, so a repeated one-directional flow (e.g. the recurring
+  DCA template always swapping USDC→EURC) gradually shifts its price and
+  will eventually hit its own `minAmountOut` slippage floor and start
+  reverting — normal constant-product-AMM behavior on a small pool, not a
+  bug. On mainnet, swaps would route through a real DEX or Circle's own FX
+  infrastructure (App Kit Swap / StableFX), with liquidity deep enough that
+  the same recurring flow runs indefinitely without moving the price.
 - Foundry test suite: **200 passing tests** (17 fuzz tests, 256 runs each)
   across `CanalisExecutor`, its condition guards (including the oracle
   price condition against a `MockPyth`), its triggers, its LockRelease,
