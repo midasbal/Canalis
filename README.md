@@ -6,7 +6,10 @@
 
 **IFTTT for your money, on rails that settle in under a second.**
 
-Built solo for the **Programmable Money Hackathon — Build on Arc** (DeFi track).
+Built solo for the **Programmable Money Hackathon — Build on Arc**. Primary
+track: **DeFi**. Secondary track: **Agentic Economy**, via a planned
+natural-language flow builder (see [Next phase](#next-phase)) where an LLM
+agent composes on-chain USDC flows from plain-English intent.
 Canalis is a self-contained, single-user visual builder for programmable USDC
 money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 
@@ -240,6 +243,14 @@ canalis/
 
 ## Status
 
+### Deployed addresses (Arc testnet)
+
+- `CanalisExecutor`: `0x5C5E45cc991DaEc5657F3BDADC3De0Cea2f1E6Cc`
+- `CanalisAccountFactory`: `0x16F9F6Ff9720B7BD6719e2C378619ce438cFB7E4`
+- `CanalisSwapPool`: `0x86baad1c84751Ef31ca113E67E7C231CE2F18ca4` (USDC/EURC, owner-seeded)
+- Pyth oracle (existing, not deployed by us): `0x2880aB155794e7179c9eE2e38200202908C17B43`
+- CCTP V2 `TokenMessengerV2` (existing, not deployed by us): `0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA`
+
 ### Implemented (real, proven on Arc testnet)
 
 - `CanalisAccount` — `deposit`, `withdraw`, `executorTransfer` (the
@@ -468,7 +479,29 @@ Copy `web/.env.example` to `.env` and fill in the deployed
 (see `web/.env.example` for the full list, including the RPC/`getLogs`
 tuning vars).
 
-## Roadmap
+## Next phase
+
+Planned, **not built yet** — none of this exists in the code today:
+
+- **Natural-language flow builder** — an LLM turns a plain-English intent
+  into a valid flow struct that pre-fills the existing composer; a human
+  still reviews and deploys, and the flow still passes the same on-chain
+  validation as one built by hand. Purely additive, no contract changes.
+  Kept free and non-abusable via a serverless proxy (Vercel/Cloudflare
+  free tier) that holds the LLM key server-side and rate-limits requests,
+  calling a free-tier LLM (Gemini/Groq). This is the piece that qualifies
+  Canalis for the **Agentic Economy** track (Circle Agent Stack), alongside
+  DeFi.
+- **Telegram flow-run notifications** — keeper-side, pings a Telegram Bot
+  API webhook on each `FlowExecuted`; free, bot token held server-side.
+- **Security** — verify the deployed contracts on the Arc explorer
+  (`testnet.arcscan.app`) and write a `SECURITY.md` threat-model doc.
+- **Polish phase** — landing page, redesigned builder/dashboard, docs page;
+  then final deploy, deck, and the 3-minute demo video.
+- **Roadmap-only (mainnet/future)** — more CCTP destination chains, real
+  yield/lending, institutional StableFX, opt-in privacy (see below).
+
+## Mainnet roadmap
 
 Beyond the MVP, there's a **mainnet roadmap** of things intentionally out of
 scope on Arc testnet because testnet lacks the required markets, assets, or
