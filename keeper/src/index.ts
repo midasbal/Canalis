@@ -3,6 +3,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { config } from "./config.ts";
 import { arcTestnet } from "./chain.ts";
 import { canalisExecutorAbi, pythAbi } from "./abi.ts";
+import { telegramEnabled, logDisabledNoticeOnce, notifyTelegram } from "./notify.ts";
+import { describeFlow } from "./flowSummary.ts";
 
 // Canalis keeper — a trust-minimized poke service for the caller-agnostic
 // triggers (OnSchedule / OnThreshold / OnReceive). It never decides
@@ -76,13 +78,43 @@ async function pokeFlow(flowId: bigint) {
     log(`executeFlow(#${flowId}) sent: ${explorerTx(hash)}`);
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    log(`executeFlow(#${flowId}) ${receipt.status === "success" ? "SUCCEEDED" : "FAILED"}: ${explorerTx(hash)}`);
+    const succeeded = receipt.status === "success";
+    log(`executeFlow(#${flowId}) ${succeeded ? "SUCCEEDED" : "FAILED"}: ${explorerTx(hash)}`);
+
+    if (succeeded) {
+      await notifyFlowExecuted(flowId, hash);
+    }
   } catch (err) {
     // Covers both a previewFlow/executeFlow revert (e.g. state changed
     // between the preview read and the send) and a transient RPC error —
     // either way, one bad flow must never take down the whole poll loop.
     const reason = extractRevertReason(err);
     log(`skip flow #${flowId}: ${reason}`);
+  }
+}
+
+/**
+ * Sends a "your money moved" Telegram ping for a flow that just executed
+ * successfully. Only called on real SUCCESS, never on a skip/revert (see
+ * pokeFlow above). A no-op if notifications are disabled; a failure to
+ * build the summary or send the message is logged and swallowed — a
+ * notification is a nice-to-have, never allowed to affect the poll loop.
+ */
+async function notifyFlowExecuted(flowId: bigint, hash: Hex) {
+  if (!telegramEnabled()) return;
+
+  try {
+    const flow = await publicClient.readContract({
+      address: config.executorAddress,
+      abi: canalisExecutorAbi,
+      functionName: "getFlow",
+      args: [flowId],
+    });
+    const summary = describeFlow(flow);
+    const text = `✅ *Flow #${flowId} ran automatically*\n${summary}\n${explorerTx(hash)}`;
+    await notifyTelegram(text, log);
+  } catch (err) {
+    log(`telegram notify skipped (couldn't build flow summary): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -232,6 +264,21 @@ async function main() {
   log(
     `canalis-keeper starting: executor=${config.executorAddress} account=${config.canalisAccount} keeper=${account.address} pollIntervalMs=${config.pollIntervalMs}`,
   );
+  logDisabledNoticeOnce(log);
+
+  if (telegramEnabled()) {
+    try {
+      const flowIds = await publicClient.readContract({
+        address: config.executorAddress,
+        abi: canalisExecutorAbi,
+        functionName: "flowsOf",
+        args: [config.canalisAccount],
+      });
+      await notifyTelegram(`🟢 Canalis keeper started, watching ${flowIds.length} flow(s)`, log);
+    } catch (err) {
+      log(`startup telegram ping skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   while (!stopping) {
     try {

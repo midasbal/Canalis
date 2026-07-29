@@ -162,6 +162,50 @@ went from `0` to `1000000` (1.000000 USDC). See
 `contracts/script/prove-cctp-bridge.sh` for the burn-leg proof this
 completion script picks up after.
 
+## Telegram notifications
+
+Optional, additive, keeper-side only — no contract or frontend changes.
+Whenever the keeper **autonomously executes a flow successfully**
+(`executeFlow` confirms with `status: "success"`), it sends a Telegram
+message so the user gets pinged that their money moved. Skips/`"not due"`
+reverts and failed executions are never notified — only real, confirmed
+successes.
+
+**Setup:**
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`,
+   follow the prompts — it gives you a bot token
+   (`123456789:ABC-...`).
+2. Message [@userinfobot](https://t.me/userinfobot) (or start a chat with
+   your new bot and check its `getUpdates` API response) to get your numeric
+   chat ID.
+3. Add both to `keeper/.env` (never commit real values — `.env.example`
+   only ever holds placeholders):
+   ```
+   TELEGRAM_BOT_TOKEN=123456789:ABC-your-real-token
+   TELEGRAM_CHAT_ID=123456789
+   ```
+4. Start a chat with your bot first (send it any message) — Telegram
+   otherwise rejects `sendMessage` to a chat that's never messaged the bot.
+
+**If either var is unset**, notifications are silently disabled — the
+keeper logs this once on startup and runs exactly as before otherwise; it
+is never a hard requirement.
+
+**What you'll see:**
+- On startup (if enabled): `🟢 Canalis keeper started, watching N flow(s)`.
+- On every successful autonomous execution:
+  ```
+  ✅ Flow #6 ran automatically
+  OnSchedule — Swap 3 USDC→EURC
+  https://testnet.arcscan.app/tx/0x...
+  ```
+
+Uses the free Telegram Bot API directly via `fetch` (no new dependency,
+no cost, no rate-limit risk beyond Telegram's own generous free limits). A
+failed send (bad token, Telegram down, network hiccup) is logged and
+swallowed — it can never crash or stall the poll loop (see `src/notify.ts`).
+
 ## What it does NOT do
 
 - It does not decide amounts, recipients, or whether a flow *should* exist —
@@ -171,3 +215,6 @@ completion script picks up after.
   error is logged and the loop continues at the next interval.
 - It does not enumerate flows across multiple CanalisAccounts — see "Flow
   discovery" above.
+- It does not notify on skips, "not due" reverts, or failed executions —
+  only on a confirmed successful `executeFlow` (see "Telegram
+  notifications" above).

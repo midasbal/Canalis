@@ -51,10 +51,11 @@ export const canalisExecutorAbi = [
     outputs: [],
   },
   {
-    // Only used to read back each flow's conditions and check for an
-    // oracle price condition (`priceId`/`maxStaleness`) before deciding
-    // whether to refresh the on-chain price — see index.ts's
-    // `oraclePriceIdsNeeded`.
+    // Used to read back each flow's conditions and check for an oracle
+    // price condition (`priceId`/`maxStaleness`) before deciding whether to
+    // refresh the on-chain price (index.ts's `oraclePriceIdsNeeded`), and
+    // to build the Telegram notification's flow summary (flowSummary.ts's
+    // `describeFlow`, index.ts's `notifyFlowExecuted`).
     type: "function",
     name: "getFlow",
     stateMutability: "view",
@@ -90,6 +91,8 @@ export const canalisExecutorAbi = [
               { name: "tokenIn", type: "address" },
               { name: "tokenOut", type: "address" },
               { name: "minAmountOut", type: "uint256" },
+              { name: "destinationDomain", type: "uint32" },
+              { name: "mintRecipient", type: "bytes32" },
             ],
           },
           { name: "active", type: "bool" },

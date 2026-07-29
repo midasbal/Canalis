@@ -25,4 +25,10 @@ export const config = {
   // (also means production feed ids, not the beta catalog's ids — see
   // web/src/lib/oracleFeeds.ts / docs/canalis-spec.md section 7.3 #2).
   hermesUrl: process.env.HERMES_URL ?? "https://hermes.pyth.network",
+  // Telegram flow-run notifications — entirely optional. Both unset =
+  // notifications silently disabled, keeper runs normally (see notify.ts).
+  // The bot token stays server-side here; never sent to/read by the
+  // frontend or committed (see .env.example's placeholder values).
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+  telegramChatId: process.env.TELEGRAM_CHAT_ID,
 };
