@@ -567,33 +567,11 @@ Copy `web/.env.example` to `.env` and fill in the deployed
 (see `web/.env.example` for the full list, including the RPC/`getLogs`
 tuning vars).
 
-## Next phase
+## Roadmap
 
-- **Natural-language flow builder** — **done**, see
-  [Natural-language flow builder](#natural-language-flow-builder) above.
-- **Telegram flow-run notifications** — **done**, see `keeper/README.md`
-  "Telegram notifications" — keeper-side, pings a Telegram Bot API webhook
-  only on a confirmed successful autonomous execution; free, bot token
-  held server-side.
-- **Security** — *planned.* Verify the deployed contracts on the Arc
-  explorer (`testnet.arcscan.app`) and write a `SECURITY.md` threat-model
-  doc.
-- **Polish phase** — *planned.* Landing page, redesigned builder/dashboard,
-  docs page; then final deploy, deck, and the 3-minute demo video.
-- **Roadmap-only (mainnet/future)** — *planned, out of scope for testnet* —
-  more CCTP destination chains, real yield/lending, institutional
-  StableFX, opt-in privacy (see below).
-
-## Mainnet roadmap
-
-Beyond the MVP, there's a **mainnet roadmap** of things intentionally out of
-scope on Arc testnet because testnet lacks the required markets, assets, or
-liquidity: swaps into real volatile assets beyond cirBTC, true DCA into
-major tokens, price-triggered trading with real economic outcomes,
-institutional FX via StableFX, yield/lending actions, a generic "call any
-DeFi protocol" action, full multi-chain Unified Balance, and opt-in privacy
-for flows. The complete spec and build checklist are tracked in a private
-internal document, not included in this repo.
+What's shipped vs. planned — productionizing for a public multi-user
+launch, security hardening, and the mainnet/ecosystem vision — is tracked
+in one place: **[ROADMAP.md](ROADMAP.md)**.
 
 ## License
 
