@@ -16,6 +16,7 @@ import { TriggerSection } from "./TriggerSection";
 import { ConditionsSection } from "./ConditionsSection";
 import { ActionsSection } from "./ActionsSection";
 import { TemplatePicker } from "./TemplatePicker";
+import { NlBuilderPanel } from "./NlBuilderPanel";
 
 const CONTRACTS_CONFIGURED = Boolean(CANALIS_EXECUTOR_ADDRESS && CANALIS_ACCOUNT_FACTORY_ADDRESS);
 
@@ -29,12 +30,13 @@ const CONTRACTS_CONFIGURED = Boolean(CANALIS_EXECUTOR_ADDRESS && CANALIS_ACCOUNT
  * here; see the Dashboard tab's deployed-flows list for where it belongs.
  */
 export function FlowComposer() {
-  const { isConnected } = useAccount();
+  const { isConnected, address: walletAddress } = useAccount();
   const { accountAddress, hasAccount, isLoading: accountLoading } = useCanalisAccount();
 
   const [draft, setDraft] = useState<ComposerDraft>(defaultDraft());
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [registeredFlowId, setRegisteredFlowId] = useState<bigint | null>(null);
+  const [aiDraftActive, setAiDraftActive] = useState(false);
 
   const registerFlow = useWriteContract();
   const registerFlowReceipt = useWaitForTransactionReceipt({ hash: registerFlow.data });
@@ -110,12 +112,24 @@ export function FlowComposer() {
   function handleReset() {
     setDraft(defaultDraft());
     setSelectedTemplateId(null);
+    setAiDraftActive(false);
     setRegisteredFlowId(null);
     registerFlow.reset();
   }
 
   return (
     <div className="flex flex-col gap-6">
+      <NlBuilderPanel
+        connectedAddress={walletAddress}
+        onGenerated={(picked, warnings) => {
+          setDraft(picked);
+          setSelectedTemplateId(null);
+          setAiDraftActive(true);
+          // eslint-disable-next-line no-console
+          if (warnings.length > 0) console.info("AI draft warnings:", warnings);
+        }}
+      />
+
       <Card eyebrow="Templates" title="Start from a template (optional)">
         <TemplatePicker
           selectedId={selectedTemplateId}
@@ -129,11 +143,16 @@ export function FlowComposer() {
             }
             setDraft(picked);
             setSelectedTemplateId(templateId);
+            setAiDraftActive(false);
           }}
         />
       </Card>
 
-      <Card eyebrow="Build a flow" title="Compose trigger → conditions → actions">
+      <Card
+        eyebrow="Build a flow"
+        title="Compose trigger → conditions → actions"
+        action={aiDraftActive ? <Badge tone="accent">Reviewing AI draft</Badge> : undefined}
+      >
         <div className="flex flex-col gap-2">
           <SectionHeading step={1} category="trigger" title="Trigger — pick one" />
           <TriggerSection trigger={draft.trigger} onChange={(trigger) => setDraft({ ...draft, trigger })} />

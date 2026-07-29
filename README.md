@@ -7,9 +7,10 @@
 **IFTTT for your money, on rails that settle in under a second.**
 
 Built solo for the **Programmable Money Hackathon — Build on Arc**. Primary
-track: **DeFi**. Secondary track: **Agentic Economy**, via a planned
-natural-language flow builder (see [Next phase](#next-phase)) where an LLM
-agent composes on-chain USDC flows from plain-English intent.
+track: **DeFi**. Secondary track: **Agentic Economy**, via a
+[natural-language flow builder](#natural-language-flow-builder) where an LLM
+drafts on-chain USDC flows from plain-English intent for a human to review
+and deploy.
 Canalis is a self-contained, single-user visual builder for programmable USDC
 money-flows on [Arc](https://docs.arc.io), Circle's stablecoin-native L1.
 
@@ -151,6 +152,78 @@ routes through `CanalisSwapPool`, a self-built constant-product AMM (see
 that the swapped-out token pays out to a recipient address named in the
 action, not back into the (USDC-only) `CanalisAccount`.
 
+## Natural-language flow builder
+
+Additive, no contract changes: a **"Describe your flow"** panel
+(`web/src/components/composer/NlBuilderPanel.tsx`) at the top of the
+composer lets you type an intent in plain English — an LLM drafts it into
+the exact same composer everyone else uses, for you to review and deploy
+yourself. It never deploys anything on its own.
+
+**How it works:** the browser calls our own serverless proxy
+(`web/api/generate-flow.ts` in production, an equivalent Vite dev
+middleware in `vite.config.ts` for `npm run dev` — never Groq directly),
+which calls Groq's chat completions API (model: `llama-3.3-70b-versatile`,
+JSON mode) with a system prompt describing the real flow model — trigger
+kinds, condition guards, action kinds, token names, and the address-safety
+rule below — plus a few worked examples. The model's flat JSON response is
+converted (`web/src/lib/nlDraft.ts`) into a real `ComposerDraft` using the
+same `emptyAction`/`emptyCondition` helpers the one-click templates already
+use, so it flows through the composer's existing sections and the exact
+same `validateComposerDraft` gate as a manually-built flow — a bad or
+incomplete AI draft simply can't deploy until the human fixes it, same as
+a bad manual one.
+
+**Key safety:** `GROQ_API_KEY` lives ONLY in `web/api/_lib/generateFlow.ts`,
+read via `process.env`, never a `VITE_`-prefixed variable — Vite only
+inlines `VITE_`-prefixed vars into the browser bundle, so the key never
+reaches client code, and the browser never talks to Groq directly.
+
+**Anti-abuse (enforced in the proxy, all four verified live against the dev
+server with a test key):**
+- **Origin check** — only the app's own configured origin (`NL_ALLOWED_ORIGIN`)
+  is served; a request carrying a foreign `Origin` header gets `403`.
+- **Input length cap** (`NL_MAX_PROMPT_CHARS`, default 500) — an oversized
+  prompt gets `400` before it ever reaches Groq.
+- **Per-IP rate limit** (`NL_RATE_LIMIT_PER_IP_PER_HOUR`, default 10/hour) —
+  confirmed live: the 4th request in a 5-request burst from one IP
+  returned `429`.
+- **A GLOBAL daily cap** across every user (`NL_DAILY_GLOBAL_CAP`, default
+  300/day, well under Groq's free tier) — confirmed live: once hit, the
+  proxy stops calling Groq entirely and returns a friendly "AI builder
+  busy, try later or use the manual composer" message instead.
+
+All four counters are in-memory (module-scope state) — fine for a
+single-user demo, but they reset on process restart (a dev-server reload,
+a fresh serverless cold start), not a durable cross-instance limiter.
+
+**Address safety (non-negotiable):** the LLM is instructed to NEVER invent
+or guess a recipient/destination address. It may only output `""` (left
+blank for the human to fill in), the literal string `"SELF"` for "me"/"my
+wallet" (resolved to the **connected wallet, client-side**, in
+`nlDraft.ts` — the model never sees or chooses that address), or an
+address the user typed verbatim in their own prompt. The same "don't
+invent" principle covers amounts too: an unspecified dollar figure comes
+back blank, never a guessed number. Ambiguous or unsupported requests
+(yield/lending, other tokens/chains, anything Canalis doesn't have) come
+back as an honest `{"error": "..."}` the UI surfaces directly, pointing
+back at the manual composer — the model never guesses its way around a
+request it can't actually build.
+
+**Running it locally:** copy `web/.env.example` to `.env`, set
+`GROQ_API_KEY` (free at [console.groq.com](https://console.groq.com/keys)),
+then `npm run dev` — the Vite dev middleware serves `/api/generate-flow`
+identically to the production Vercel function. Leaving `GROQ_API_KEY`
+unset doesn't crash anything — the proxy honestly reports "AI builder
+isn't configured" and the rest of the app (manual composer, templates)
+works exactly as before.
+
+**Dual-track intent:** Canalis's primary track is DeFi. This feature is
+what qualifies it for the **Agentic Economy** track too, secondarily — an
+LLM composing a real on-chain USDC flow from plain-English intent, framed
+as a lightweight Circle Agent Stack pattern (an agent that drafts, a human
+who approves) rather than a fully autonomous agent.
+
 ## Repo layout
 
 ```
@@ -208,6 +281,9 @@ canalis/
 │   │   └── complete-cctp-bridge.ts         # standalone: polls Circle's real attestation API, completes the mint on Ethereum Sepolia
 │   └── .env.example                        # RPC_URL / EXECUTOR_ADDRESS / CANALIS_ACCOUNT / KEEPER_PRIVATE_KEY / ORACLE_ADDRESS / HERMES_URL / POLL_INTERVAL_MS / SEPOLIA_RPC_URL / SEPOLIA_PRIVATE_KEY
 └── web/                            # Vite + React + TS frontend
+    ├── api/                                 # serverless proxy — the ONLY place GROQ_API_KEY is read (see "Natural-language flow builder")
+    │   ├── generate-flow.ts                  # Vercel Web Fetch API entry point (POST)
+    │   └── _lib/generateFlow.ts               # shared core: Groq call, system prompt, anti-abuse limits — used by generate-flow.ts AND vite.config.ts's dev middleware
     ├── src/
     │   ├── chains.ts / wagmi.ts             # Arc testnet chain + rate-limit-aware wagmi transport
     │   ├── lib/
@@ -216,6 +292,7 @@ canalis/
     │   │   ├── bridgeDestinations.ts          # curated CCTP V2 destination-chain catalog (Ethereum Sepolia)
     │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above (incl. CanalisSwapPool, IPyth)
     │   │   ├── composer.ts                  # composer draft state -> Flow, validation
+    │   │   ├── nlDraft.ts                    # converts the NL proxy's flat LLM JSON into a real ComposerDraft; resolves "SELF" to the connected wallet client-side
     │   │   ├── flowSummary.ts               # plain-English flow/action summaries
     │   │   ├── contracts.ts                 # deployed-address env lookup
     │   │   └── useCanalisAccount.ts         # resolves the connected wallet's CanalisAccount
@@ -223,13 +300,14 @@ canalis/
     │   │   ├── Header.tsx                   # wordmark + tab nav + wallet connect
     │   │   ├── WalletConnect.tsx             # injected-wallet connect/disconnect
     │   │   ├── BuilderCanvas.tsx             # hosts the flow composer
-    │   │   ├── composer/                    # stepper composer: trigger/conditions/actions sections, templates
+    │   │   ├── composer/                    # stepper composer: trigger/conditions/actions sections, templates, NlBuilderPanel.tsx ("Describe your flow")
     │   │   ├── DeployedFlows.tsx / FlowRow.tsx # deployed-flows list, pause/run-now, live previewFlow status
     │   │   ├── RunLog.tsx                   # FlowExecuted/ActionExecuted history, "ran automatically" detection
     │   │   ├── Dashboard.tsx                # account/balance + deployed flows + run log
     │   │   └── ui/                          # Card, Badge, EmptyState, etc.
     │   └── index.css                       # Tailwind v4 theme (dark, "channel" palette)
-    └── .env.example                         # RPC override + deployed-contract address placeholders
+    ├── vite.config.ts                       # also wires up the NL proxy's dev-mode middleware (see api/)
+    └── .env.example                         # RPC/deployed-contract placeholders + the NL proxy's server-only env vars (GROQ_API_KEY etc. — never VITE_-prefixed)
 ```
 
 ## Tech stack
@@ -491,25 +569,20 @@ tuning vars).
 
 ## Next phase
 
-Planned, **not built yet** — none of this exists in the code today:
-
-- **Natural-language flow builder** — an LLM turns a plain-English intent
-  into a valid flow struct that pre-fills the existing composer; a human
-  still reviews and deploys, and the flow still passes the same on-chain
-  validation as one built by hand. Purely additive, no contract changes.
-  Kept free and non-abusable via a serverless proxy (Vercel/Cloudflare
-  free tier) that holds the LLM key server-side and rate-limits requests,
-  calling a free-tier LLM (Gemini/Groq). This is the piece that qualifies
-  Canalis for the **Agentic Economy** track (Circle Agent Stack), alongside
-  DeFi.
-- **Telegram flow-run notifications** — keeper-side, pings a Telegram Bot
-  API webhook on each `FlowExecuted`; free, bot token held server-side.
-- **Security** — verify the deployed contracts on the Arc explorer
-  (`testnet.arcscan.app`) and write a `SECURITY.md` threat-model doc.
-- **Polish phase** — landing page, redesigned builder/dashboard, docs page;
-  then final deploy, deck, and the 3-minute demo video.
-- **Roadmap-only (mainnet/future)** — more CCTP destination chains, real
-  yield/lending, institutional StableFX, opt-in privacy (see below).
+- **Natural-language flow builder** — **done**, see
+  [Natural-language flow builder](#natural-language-flow-builder) above.
+- **Telegram flow-run notifications** — **done**, see `keeper/README.md`
+  "Telegram notifications" — keeper-side, pings a Telegram Bot API webhook
+  only on a confirmed successful autonomous execution; free, bot token
+  held server-side.
+- **Security** — *planned.* Verify the deployed contracts on the Arc
+  explorer (`testnet.arcscan.app`) and write a `SECURITY.md` threat-model
+  doc.
+- **Polish phase** — *planned.* Landing page, redesigned builder/dashboard,
+  docs page; then final deploy, deck, and the 3-minute demo video.
+- **Roadmap-only (mainnet/future)** — *planned, out of scope for testnet* —
+  more CCTP destination chains, real yield/lending, institutional
+  StableFX, opt-in privacy (see below).
 
 ## Mainnet roadmap
 
