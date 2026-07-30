@@ -478,10 +478,10 @@ export function validateComposerDraft(
       for (const r of a.splitRecipients) {
         if (!isAddress(r.address.trim())) errors.push(`${label}: every recipient must be a valid 0x… address.`);
         const bps = parseIntSafe(r.bps);
-        if (bps === null) errors.push(`${label}: every share must be a whole number of basis points (0-10000).`);
+        if (bps === null) errors.push(`${label}: every share must be a valid percentage (0-100, up to 2 decimals).`);
         else bpsSum += bps;
       }
-      if (bpsSum > 10_000n) errors.push(`${label}: basis points sum to ${bpsSum}, must be ≤ 10000 (100%).`);
+      if (bpsSum > 10_000n) errors.push(`${label}: shares add up to ${(Number(bpsSum) / 100).toFixed(2)}%, must not exceed 100%.`);
     }
     if (a.kind === ActionType.Sweep) {
       if (!isAddress(a.sweepDestination.trim())) errors.push(`${label}: destination must be a valid 0x… address.`);

@@ -5,7 +5,7 @@ import { pythAbi } from "../../lib/abi";
 import { CANALIS_ORACLE_ADDRESS } from "../../lib/contracts";
 import { AddressField, AmountField, Field, RemoveButton } from "./inputs";
 
-const CONDITION_KINDS: ConditionKind[] = [
+export const CONDITION_KINDS: ConditionKind[] = [
   "amountCap",
   "minBalance",
   "cooldown",
@@ -67,7 +67,7 @@ export function ConditionsSection({ conditions, onChange }: ConditionsSectionPro
   );
 }
 
-function ConditionCard({
+export function ConditionCard({
   condition,
   onChange,
   onRemove,

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useReadContract } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
 import { ActionType } from "../../lib/flows";
@@ -16,7 +16,7 @@ import { USDC_DECIMALS } from "../../lib/format";
 import { BRIDGE_DESTINATIONS } from "../../lib/bridgeDestinations";
 import { AddressField, AmountField, Field, RemoveButton } from "./inputs";
 
-const ACTION_KINDS: ActionType[] = [
+export const ACTION_KINDS: ActionType[] = [
   ActionType.Forward,
   ActionType.Split,
   ActionType.Sweep,
@@ -24,6 +24,64 @@ const ACTION_KINDS: ActionType[] = [
   ActionType.Swap,
   ActionType.Bridge,
 ];
+
+const PERCENT_INPUT_PATTERN = /^\d*\.?\d{0,2}$/;
+
+/**
+ * UI-only bps <-> percent conversion for Split shares and Swap slippage.
+ * The underlying ComposerAction field (splitRecipients[].bps,
+ * swapSlippageBps) stays basis points, unchanged, everywhere else, since
+ * that's what composer.ts/draftToFlow and the contract actually use. Only
+ * the input display and the node/chip summaries show percent, converting
+ * at this boundary (percent x 100 = bps, rounded to stay a whole bps
+ * integer). Up to 2 decimal places, so bps-level precision (e.g. 33.33%)
+ * is still reachable.
+ */
+export function bpsStringToPercentText(bpsValue: string): string {
+  if (!bpsValue.trim()) return "";
+  const n = Number(bpsValue);
+  if (!Number.isFinite(n)) return "";
+  const pct = Math.round(n) / 100;
+  return String(Math.round(pct * 100) / 100);
+}
+
+function percentTextToBpsString(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed === ".") return "";
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return "";
+  return String(Math.round(n * 100));
+}
+
+/** A bps-backed field that reads and is typed as a percentage (e.g. "70", "33.33"). Keeps its own text buffer so a trailing decimal point isn't stripped mid-typing. */
+function PercentField({
+  label,
+  bps,
+  onBpsChange,
+  placeholder,
+}: {
+  label: string;
+  bps: string;
+  onBpsChange: (bps: string) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() => bpsStringToPercentText(bps));
+
+  return (
+    <Field
+      label={label}
+      value={text}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (!PERCENT_INPUT_PATTERN.test(raw)) return;
+        setText(raw);
+        onBpsChange(percentTextToBpsString(raw));
+      }}
+      placeholder={placeholder}
+      inputMode="decimal"
+    />
+  );
+}
 
 interface ActionsSectionProps {
   actions: ComposerAction[];
@@ -78,7 +136,7 @@ export function ActionsSection({ actions, onChange }: ActionsSectionProps) {
   );
 }
 
-function ActionCard({
+export function ActionCard({
   index,
   action,
   onChange,
@@ -256,12 +314,11 @@ function SwapEditor({ action, onChange }: { action: ComposerAction; onChange: (p
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field
-          label="Slippage tolerance (bps, e.g. 100 = 1%)"
-          value={action.swapSlippageBps}
-          onChange={(e) => onChange({ swapSlippageBps: e.target.value })}
-          placeholder="100"
-          inputMode="numeric"
+        <PercentField
+          label="Slippage tolerance (%)"
+          bps={action.swapSlippageBps}
+          onBpsChange={(swapSlippageBps) => onChange({ swapSlippageBps })}
+          placeholder="1"
         />
         <AmountField
           label={`Minimum received (${tokenOutSymbol}), sent on-chain`}
@@ -305,14 +362,8 @@ function SplitEditor({ action, onChange }: { action: ComposerAction; onChange: (
             <div className="flex-1">
               <AddressField label="Recipient" value={row.address} onChange={(e) => updateRow(row.id, { address: e.target.value })} />
             </div>
-            <div className="w-28">
-              <Field
-                label="Share (bps)"
-                value={row.bps}
-                onChange={(e) => updateRow(row.id, { bps: e.target.value })}
-                placeholder="7000"
-                inputMode="numeric"
-              />
+            <div className="w-24">
+              <PercentField label="Share (%)" bps={row.bps} onBpsChange={(bps) => updateRow(row.id, { bps })} placeholder="70" />
             </div>
             <RemoveButton onClick={() => removeRow(row.id)} label="Remove recipient" />
           </div>
@@ -327,7 +378,7 @@ function SplitEditor({ action, onChange }: { action: ComposerAction; onChange: (
       </div>
 
       <p className={`text-xs ${over ? "text-red-400" : "text-ink-faint"}`}>
-        {bpsSum} / 10000 bps ({(bpsSum / 100).toFixed(2)}%) {over && "(exceeds 100%)"}
+        {bpsStringToPercentText(String(bpsSum))}% of 100% {over && "(exceeds 100%)"}
       </p>
     </div>
   );

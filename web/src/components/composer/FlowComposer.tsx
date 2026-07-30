@@ -4,7 +4,6 @@ import { decodeEventLog } from "viem";
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { InfoTooltip } from "../ui/InfoTooltip";
-import { FlowConnector } from "../ui/FlowConnector";
 import { CreateCanalisAccountPrompt } from "../CreateCanalisAccountPrompt";
 import { useCanalisAccount } from "../../lib/useCanalisAccount";
 import { canalisExecutorAbi } from "../../lib/abi";
@@ -13,9 +12,7 @@ import { arcscanTxUrl } from "../../lib/format";
 import { getRevertReason } from "../../lib/errors";
 import { summarizeFlow } from "../../lib/flowSummary";
 import { defaultDraft, draftToFlow, validateComposerDraft, type ComposerDraft } from "../../lib/composer";
-import { TriggerSection } from "./TriggerSection";
-import { ConditionsSection } from "./ConditionsSection";
-import { ActionsSection } from "./ActionsSection";
+import { ChannelCanvas } from "./ChannelCanvas";
 import { TemplatePicker } from "./TemplatePicker";
 import { NlBuilderPanel } from "./NlBuilderPanel";
 
@@ -178,28 +175,18 @@ export function FlowComposer() {
         }
         action={aiDraftActive ? <Badge tone="accent">Reviewing AI draft</Badge> : undefined}
       >
-        <div className="flex flex-col gap-2">
-          <p className="mb-2 max-w-prose font-display text-sm text-brand-muted italic">
-            Every channel begins with a single source.
-          </p>
+        <p className="mb-3 max-w-prose font-display text-sm text-brand-muted italic">
+          Every channel begins with a single source.
+        </p>
 
-          <SectionHeading step={1} category="trigger" title="Trigger: pick one" />
-          <TriggerSection trigger={draft.trigger} onChange={(trigger) => setDraft({ ...draft, trigger })} />
-
-          <div className="my-2">
-            <FlowConnector vertical />
-          </div>
-
-          <SectionHeading step={2} category="condition" title="Conditions: add zero or more" />
-          <ConditionsSection conditions={draft.conditions} onChange={(conditions) => setDraft({ ...draft, conditions })} />
-
-          <div className="my-2">
-            <FlowConnector vertical />
-          </div>
-
-          <SectionHeading step={3} category="action" title="Actions: add at least one" />
-          <ActionsSection actions={draft.actions} onChange={(actions) => setDraft({ ...draft, actions })} />
-        </div>
+        <ChannelCanvas
+          trigger={draft.trigger}
+          onTriggerChange={(trigger) => setDraft({ ...draft, trigger })}
+          conditions={draft.conditions}
+          onConditionsChange={(conditions) => setDraft({ ...draft, conditions })}
+          actions={draft.actions}
+          onActionsChange={(actions) => setDraft({ ...draft, actions })}
+        />
       </Card>
 
       <Card eyebrow="Preview" title="What this will do" className="border-brand-violet/25">
@@ -250,19 +237,5 @@ export function FlowComposer() {
         )}
       </Card>
     </div>
-  );
-}
-
-const CATEGORY_TEXT: Record<"trigger" | "condition" | "action", string> = {
-  trigger: "text-trigger",
-  condition: "text-condition",
-  action: "text-action",
-};
-
-function SectionHeading({ step, category, title }: { step: number; category: "trigger" | "condition" | "action"; title: string }) {
-  return (
-    <h4 className={`mb-2 text-xs font-semibold uppercase tracking-wider ${CATEGORY_TEXT[category]}`}>
-      {step}. {title}
-    </h4>
   );
 }
