@@ -3,6 +3,7 @@ import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagm
 import { decodeEventLog } from "viem";
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
+import { InfoTooltip } from "../ui/InfoTooltip";
 import { FlowConnector } from "../ui/FlowConnector";
 import { CreateCanalisAccountPrompt } from "../CreateCanalisAccountPrompt";
 import { useCanalisAccount } from "../../lib/useCanalisAccount";
@@ -118,63 +119,91 @@ export function FlowComposer() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <NlBuilderPanel
-        connectedAddress={walletAddress}
-        onGenerated={(picked, warnings) => {
-          setDraft(picked);
-          setSelectedTemplateId(null);
-          setAiDraftActive(true);
-          // eslint-disable-next-line no-console
-          if (warnings.length > 0) console.info("AI draft warnings:", warnings);
-        }}
-      />
-
-      <Card eyebrow="Templates" title="Start from a template (optional)">
-        <TemplatePicker
-          selectedId={selectedTemplateId}
-          onPick={(picked, templateId) => {
-            if (templateId === selectedTemplateId) {
-              // Clicking the already-selected template again toggles it
-              // off — same as hitting Reset, not just clearing the
-              // highlight while leaving the pre-filled draft behind.
-              handleReset();
-              return;
-            }
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
+        <NlBuilderPanel
+          connectedAddress={walletAddress}
+          onGenerated={(picked, warnings) => {
             setDraft(picked);
-            setSelectedTemplateId(templateId);
-            setAiDraftActive(false);
+            setSelectedTemplateId(null);
+            setAiDraftActive(true);
+            // eslint-disable-next-line no-console
+            if (warnings.length > 0) console.info("AI draft warnings:", warnings);
           }}
         />
-      </Card>
+
+        <Card
+          variant="flat"
+          eyebrow="Templates"
+          title={
+            <>
+              Start from a template (optional)
+              <InfoTooltip label="About templates">
+                Pre-built flows for common patterns. Pick one to fill in the builder below, then adjust anything
+                before deploying.
+              </InfoTooltip>
+            </>
+          }
+        >
+          <TemplatePicker
+            selectedId={selectedTemplateId}
+            onPick={(picked, templateId) => {
+              if (templateId === selectedTemplateId) {
+                // Clicking the already-selected template again toggles it
+                // off, same as hitting Reset, not just clearing the
+                // highlight while leaving the pre-filled draft behind.
+                handleReset();
+                return;
+              }
+              setDraft(picked);
+              setSelectedTemplateId(templateId);
+              setAiDraftActive(false);
+            }}
+          />
+        </Card>
+      </div>
+
+      <div className="my-1 border-t border-brand-bronze/15" />
 
       <Card
         eyebrow="Build a flow"
-        title="Compose trigger → conditions → actions"
+        title={
+          <>
+            Compose trigger → conditions → actions
+            <InfoTooltip label="About building a flow">
+              Every flow needs exactly one trigger and at least one action. Conditions are optional. Fill these in
+              below, then check the preview before you deploy.
+            </InfoTooltip>
+          </>
+        }
         action={aiDraftActive ? <Badge tone="accent">Reviewing AI draft</Badge> : undefined}
       >
         <div className="flex flex-col gap-2">
-          <SectionHeading step={1} category="trigger" title="Trigger — pick one" />
+          <p className="mb-2 max-w-prose font-display text-sm text-brand-muted italic">
+            Every channel begins with a single source.
+          </p>
+
+          <SectionHeading step={1} category="trigger" title="Trigger: pick one" />
           <TriggerSection trigger={draft.trigger} onChange={(trigger) => setDraft({ ...draft, trigger })} />
 
           <div className="my-2">
             <FlowConnector vertical />
           </div>
 
-          <SectionHeading step={2} category="condition" title="Conditions — add zero or more" />
+          <SectionHeading step={2} category="condition" title="Conditions: add zero or more" />
           <ConditionsSection conditions={draft.conditions} onChange={(conditions) => setDraft({ ...draft, conditions })} />
 
           <div className="my-2">
             <FlowConnector vertical />
           </div>
 
-          <SectionHeading step={3} category="action" title="Actions — add at least one" />
+          <SectionHeading step={3} category="action" title="Actions: add at least one" />
           <ActionsSection actions={draft.actions} onChange={(actions) => setDraft({ ...draft, actions })} />
         </div>
       </Card>
 
-      <Card eyebrow="Preview" title="What this will do">
-        <p className="text-sm text-ink">{summarizeFlow(composedFlow)}</p>
+      <Card eyebrow="Preview" title="What this will do" className="border-brand-violet/25">
+        <p className="max-w-prose text-sm text-ink">{summarizeFlow(composedFlow)}</p>
 
         {errors.length > 0 && (
           <ul className="mt-3 flex flex-col gap-1 border-t border-border-soft pt-3 text-xs text-red-400">
@@ -207,7 +236,7 @@ export function FlowComposer() {
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
             <Badge tone="accent">Deployed</Badge>
             <span className="text-ink-muted">
-              Flow #{registeredFlowId.toString()} registered — switch to the Dashboard tab to see it in "Deployed flows".
+              Flow #{registeredFlowId.toString()} registered. Switch to the Flows tab to see it in "Deployed flows".
             </span>
             <a
               href={arcscanTxUrl(registerFlowReceipt.data.transactionHash)}

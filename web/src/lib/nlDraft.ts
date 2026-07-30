@@ -114,7 +114,7 @@ function resolveAddress(value: string | undefined, connectedAddress: Address | u
   if (!value) return "";
   if (value.trim().toUpperCase() === "SELF") {
     if (connectedAddress) return connectedAddress;
-    warnings.push(`${fieldLabel}: you weren't connected, so this was left blank — fill in an address before deploying.`);
+    warnings.push(`${fieldLabel}: you weren't connected, so this was left blank. Fill in an address before deploying.`);
     return "";
   }
   return value.trim();
@@ -192,7 +192,7 @@ function nlConditionToComposer(c: NlCondition, warnings: string[]): ComposerCond
       if (feed) {
         cond.oracleFeedKey = feed.key;
       } else {
-        warnings.push(`Oracle price: didn't recognize feed "${c.feed}" — defaulted to ${ORACLE_FEEDS[0].label}, double-check it's right.`);
+        warnings.push(`Oracle price: didn't recognize feed "${c.feed}", defaulted to ${ORACLE_FEEDS[0].label}. Double-check it's right.`);
       }
       cond.oracleDirection = c.direction === "above" ? "above" : "below";
       cond.oracleThreshold = c.thresholdUsd !== undefined && c.thresholdUsd > 0 ? String(c.thresholdUsd) : "";
@@ -253,7 +253,7 @@ function nlActionToComposer(a: NlAction, connectedAddress: Address | undefined, 
       if (destination) {
         action.bridgeDestinationKey = destination.key;
       } else if (a.destination) {
-        warnings.push(`Bridge: didn't recognize destination "${a.destination}" — defaulted to ${BRIDGE_DESTINATIONS[0].label}, double-check it's right.`);
+        warnings.push(`Bridge: didn't recognize destination "${a.destination}", defaulted to ${BRIDGE_DESTINATIONS[0].label}. Double-check it's right.`);
       }
       action.bridgeAmount = numOrEmpty(a.amountUsdc);
       action.bridgeRecipient = resolveAddress(a.recipient, connectedAddress, warnings, "Bridge recipient");

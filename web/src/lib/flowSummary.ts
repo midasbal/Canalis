@@ -58,9 +58,9 @@ function summarizeTrigger(trigger: Trigger): string {
       // One-shot: the executor sets scheduleAt to `type(uint256).max` once
       // it has run — "never due again", not a real future date.
       if (trigger.scheduleAt === SCHEDULE_NEVER_AGAIN) {
-        return "One-time — already run";
+        return "One-time, already run";
       }
-      return `One-time — runs at ${formatTimestamp(trigger.scheduleAt)}`;
+      return `One-time, runs at ${formatTimestamp(trigger.scheduleAt)}`;
     }
     default:
       return "On an unknown trigger";
@@ -110,7 +110,7 @@ function summarizeAction(action: Action): string {
         const pct = Number(bps) / 100;
         return `${pct}% to ${shortAddress(recipient)}`;
       });
-      return `split ${formatUsdc(action.fixedAmount)} USDC — ${legs.join(", ")}`;
+      return `split ${formatUsdc(action.fixedAmount)} USDC: ${legs.join(", ")}`;
     }
     case ActionType.Sweep:
       return `sweep everything above ${formatUsdc(action.sweepThreshold)} USDC to ${shortAddress(action.recipients[0] ?? "0x0")}`;

@@ -8,8 +8,8 @@ interface BadgeProps {
 /** Small status label — used for honest "not yet implemented" markers. */
 export function Badge({ children, tone = "neutral" }: BadgeProps) {
   const tones: Record<NonNullable<BadgeProps["tone"]>, string> = {
-    neutral: "bg-white/5 text-ink-muted border-border",
-    accent: "bg-accent-soft text-accent-strong border-accent/30",
+    neutral: "bg-white/5 text-brand-muted border-brand-bronze/25",
+    accent: "bg-brand-violet/15 text-brand-violet-soft border-brand-violet/30",
     warning: "bg-condition-soft text-condition border-condition/30",
   };
 

@@ -4,19 +4,24 @@ import { Badge } from "./Badge";
 interface EmptyStateProps {
   icon: ReactNode;
   title: string;
-  detail: string;
+  detail?: string;
+  /** Defaults to a "Coming soon" badge (the original not-implemented-yet marker) — pass `null` to omit it for a genuinely actionable empty state. */
+  badge?: ReactNode;
+  /** Optional real call to action rendered below the copy (e.g. a link to the Builder). */
+  action?: ReactNode;
 }
 
-/** Intentional "not implemented yet" state — never dressed up as live data. */
-export function EmptyState({ icon, title, detail }: EmptyStateProps) {
+/** Empty/placeholder state — either an honest "not implemented yet" marker, or a real actionable empty state (badge omitted). */
+export function EmptyState({ icon, title, detail, badge = <Badge tone="warning">Coming soon</Badge>, action }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border py-10 text-center">
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-ink-faint">{icon}</div>
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-brand-bronze/25 py-10 text-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-brand-muted">{icon}</div>
       <div className="flex flex-col items-center gap-1.5">
-        <p className="text-sm font-medium text-ink-muted">{title}</p>
-        <Badge tone="warning">Coming soon</Badge>
+        <p className="text-sm font-medium text-brand-muted">{title}</p>
+        {badge}
       </div>
-      <p className="max-w-xs text-xs text-ink-faint">{detail}</p>
+      {detail && <p className="max-w-xs text-xs text-brand-muted/70">{detail}</p>}
+      {action}
     </div>
   );
 }

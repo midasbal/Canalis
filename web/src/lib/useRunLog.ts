@@ -266,7 +266,7 @@ export function useRunLog(connectedWallet: Address | undefined, ownFlowIds: read
             if (!ownFlowIdSetRef.current.has(entry.flowId.toString())) continue; // not one of this account's flows
             const wallet = connectedWalletRef.current;
             if (wallet && entry.triggeredBy.toLowerCase() === wallet.toLowerCase()) continue;
-            pushToast(setToasts, `Flow #${entry.flowId.toString()} ran automatically — see the run log below.`);
+            pushToast(setToasts, `Flow #${entry.flowId.toString()} ran automatically. See the run log below.`);
           }
 
           // Only advance past what we're confident we actually covered —

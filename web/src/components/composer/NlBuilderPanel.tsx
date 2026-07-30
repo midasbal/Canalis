@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Address } from "viem";
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
+import { InfoTooltip } from "../ui/InfoTooltip";
 import type { ComposerDraft } from "../../lib/composer";
 import { isNlFlowError, nlDraftToComposerDraft, parseNlFlowResponse } from "../../lib/nlDraft";
 
@@ -70,8 +71,8 @@ export function NlBuilderPanel({ connectedAddress, onGenerated }: NlBuilderPanel
       setNoticeTone("info");
       setNotice(
         warnings.length > 0
-          ? `Draft generated — review every field below before deploying. ${warnings.join(" ")}`
-          : "Draft generated — review every field below before deploying.",
+          ? `Draft generated. Review every field below before deploying. ${warnings.join(" ")}`
+          : "Draft generated. Review every field below before deploying.",
       );
     } catch (err) {
       setNoticeTone("error");
@@ -82,11 +83,24 @@ export function NlBuilderPanel({ connectedAddress, onGenerated }: NlBuilderPanel
   }
 
   return (
-    <Card eyebrow="Describe your flow" title="Draft with AI (optional)" action={<Badge tone="accent">Human reviews before deploy</Badge>}>
-      <p className="mb-3 text-xs leading-snug text-ink-muted">
+    <Card
+      variant="flat"
+      eyebrow="Describe your flow"
+      title={
+        <>
+          Draft with AI (optional)
+          <InfoTooltip label="About Draft with AI">
+            Describe a flow in plain English and get a starting draft below. You review and edit every field, and it
+            never deploys on its own.
+          </InfoTooltip>
+        </>
+      }
+      action={<Badge tone="accent">Human reviews before deploy</Badge>}
+    >
+      <p className="mb-3 max-w-prose text-xs leading-snug text-ink-muted">
         Describe a flow in plain English and an LLM drafts it into the composer below for you to review, edit, and
-        deploy yourself — it never deploys anything on its own, and it never invents recipient addresses (leave one
-        blank to fill in yourself, or say "to me" / "my wallet" to use your connected wallet).
+        deploy yourself. It never deploys anything on its own, and it never invents recipient addresses. Leave one
+        blank to fill in yourself, or say "to me" or "my wallet" to use your connected wallet.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
         <textarea

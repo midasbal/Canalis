@@ -79,7 +79,7 @@ export function RunLog() {
 
   if (!CONTRACTS_CONFIGURED) {
     return (
-      <Card eyebrow="Activity" title="Run log">
+      <Card eyebrow="Activity" title="Run log" variant="flat">
         <p className="text-sm text-ink-muted">
           Set <code className="font-mono text-ink">VITE_CANALIS_EXECUTOR_ADDRESS</code> in <code>web/.env</code>.
         </p>
@@ -89,7 +89,7 @@ export function RunLog() {
 
   if (!isConnected) {
     return (
-      <Card eyebrow="Activity" title="Run log">
+      <Card eyebrow="Activity" title="Run log" variant="flat">
         <p className="text-sm text-ink-muted">Connect a wallet to see your flows' run history.</p>
       </Card>
     );
@@ -97,7 +97,7 @@ export function RunLog() {
 
   if (accountLoading) {
     return (
-      <Card eyebrow="Activity" title="Run log">
+      <Card eyebrow="Activity" title="Run log" variant="flat">
         <p className="text-sm text-ink-muted">Checking for your Canalis account…</p>
       </Card>
     );
@@ -105,14 +105,14 @@ export function RunLog() {
 
   if (!hasAccount) {
     return (
-      <Card eyebrow="Activity" title="Run log">
+      <Card eyebrow="Activity" title="Run log" variant="flat">
         <CreateCanalisAccountPrompt message="You need a CanalisAccount before you have any run history." />
       </Card>
     );
   }
 
   return (
-    <Card eyebrow="Activity" title="Run log">
+    <Card eyebrow="Activity" title="Run log" variant="flat">
       {toasts.length > 0 && (
         <div className="mb-4 flex flex-col gap-2">
           {toasts.map((toast) => (
@@ -132,7 +132,7 @@ export function RunLog() {
       {flowIdsQuery.isError || historyError ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-red-400">
-            Couldn't load run history — {getRevertReason(flowIdsQuery.error ?? historyError)}
+            Couldn't load run history. {getRevertReason(flowIdsQuery.error ?? historyError)}
           </p>
           <button
             onClick={() => (flowIdsQuery.isError ? flowIdsQuery.refetch() : retryHistory())}
@@ -147,7 +147,7 @@ export function RunLog() {
         <>
           {partial && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-condition/30 bg-condition-soft px-3.5 py-2.5 text-sm text-condition">
-              <span>Some blocks couldn't be scanned — history below may be incomplete.</span>
+              <span>Some blocks couldn't be scanned, so history below may be incomplete.</span>
               <button onClick={retryHistory} className="text-xs underline underline-offset-2">
                 Retry full scan
               </button>
@@ -157,7 +157,8 @@ export function RunLog() {
             <EmptyState
               icon={<LogIcon />}
               title="No executions recorded yet"
-              detail="Every FlowExecuted / ActionExecuted event on this executor will show up here, newest first."
+              detail="Every run on this executor will show up here, newest first."
+              badge={null}
             />
           ) : (
             <div className="flex flex-col gap-3">

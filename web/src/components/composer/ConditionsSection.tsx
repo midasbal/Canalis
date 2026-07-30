@@ -50,7 +50,7 @@ export function ConditionsSection({ conditions, onChange }: ConditionsSectionPro
       </div>
 
       {conditions.length === 0 ? (
-        <p className="text-xs text-ink-faint">No conditions — the flow runs whenever its trigger fires, unguarded.</p>
+        <p className="text-xs text-ink-faint">No conditions. The flow runs whenever its trigger fires, unguarded.</p>
       ) : (
         <div className="flex flex-col gap-3">
           {conditions.map((condition) => (
@@ -211,14 +211,14 @@ function OraclePriceEditor({
         inputMode="numeric"
       />
 
-      <p className="text-xs text-ink-faint">
+      <p className="max-w-prose text-xs text-ink-faint">
         {!CANALIS_ORACLE_ADDRESS
           ? "Oracle not configured (VITE_ORACLE_ADDRESS)."
           : priceQuery.isLoading
             ? "Reading live oracle price…"
             : liveUsd !== undefined
-              ? `Current ${feed.label} oracle price: $${liveUsd.toFixed(5)} (last updated ${lastUpdated?.toLocaleTimeString()}). The keeper refreshes this on-chain before evaluating flows with an oracle condition — see keeper/README.md.`
-              : "No price stored on-chain yet for this feed — the keeper updates it before evaluating flows that need it."}
+              ? `Current ${feed.label} oracle price: $${liveUsd.toFixed(5)} (last updated ${lastUpdated?.toLocaleTimeString()}). The keeper refreshes this on-chain before evaluating flows with an oracle condition, see keeper/README.md.`
+              : "No price stored on-chain yet for this feed. The keeper updates it before evaluating flows that need it."}
       </p>
     </div>
   );

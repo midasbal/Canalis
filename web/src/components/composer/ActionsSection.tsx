@@ -60,7 +60,7 @@ export function ActionsSection({ actions, onChange }: ActionsSectionProps) {
       </div>
 
       {actions.length === 0 ? (
-        <p className="text-xs text-ink-faint">Add at least one action — a flow that does nothing can't be deployed.</p>
+        <p className="text-xs text-ink-faint">Add at least one action. A flow that does nothing can't be deployed.</p>
       ) : (
         <div className="flex flex-col gap-3">
           {actions.map((action, index) => (
@@ -111,7 +111,7 @@ function ActionCard({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <AddressField label="Destination" value={action.sweepDestination} onChange={(e) => onChange({ sweepDestination: e.target.value })} />
           <AmountField
-            label="Leave behind (USDC) — sweeps everything above this"
+            label="Leave behind (USDC), sweeps everything above this"
             value={action.sweepThreshold}
             onChange={(e) => onChange({ sweepThreshold: e.target.value })}
           />
@@ -173,9 +173,9 @@ function BridgeEditor({ action, onChange }: { action: ComposerAction; onChange: 
         onChange={(e) => onChange({ bridgeRecipient: e.target.value })}
       />
 
-      <p className="text-xs text-ink-faint">
+      <p className="max-w-prose text-xs text-ink-faint">
         Burns USDC on Arc via Circle's real CCTP V2. The mint on the destination chain completes separately, once Circle's
-        attestation service signs the burn — it isn't part of this transaction and can take a few minutes.
+        attestation service signs the burn. That isn't part of this transaction and can take a few minutes.
       </p>
     </div>
   );
@@ -264,19 +264,19 @@ function SwapEditor({ action, onChange }: { action: ComposerAction; onChange: (p
           inputMode="numeric"
         />
         <AmountField
-          label={`Minimum received (${tokenOutSymbol}) — sent on-chain`}
+          label={`Minimum received (${tokenOutSymbol}), sent on-chain`}
           value={action.swapMinAmountOut}
           onChange={(e) => onChange({ swapMinAmountOut: e.target.value })}
         />
       </div>
 
-      <p className="text-xs text-ink-faint">
+      <p className="max-w-prose text-xs text-ink-faint">
         {!CANALIS_SWAP_POOL_ADDRESS
-          ? "Pool not configured (VITE_CANALIS_SWAP_POOL_ADDRESS) — enter a minimum received manually."
+          ? "Pool not configured (VITE_CANALIS_SWAP_POOL_ADDRESS). Enter a minimum received manually."
           : quoteQuery.isLoading
             ? "Fetching live pool quote…"
             : quote !== undefined
-              ? `Live quote: ${formatUnits(quote, USDC_DECIMALS)} ${tokenOutSymbol} right now — minimum received above is auto-computed from this and your slippage tolerance (you can still edit it directly).`
+              ? `Live quote: ${formatUnits(quote, USDC_DECIMALS)} ${tokenOutSymbol} right now. Minimum received above is auto-computed from this and your slippage tolerance (you can still edit it directly).`
               : "Enter an amount to see a live pool quote."}
       </p>
     </div>
@@ -327,7 +327,7 @@ function SplitEditor({ action, onChange }: { action: ComposerAction; onChange: (
       </div>
 
       <p className={`text-xs ${over ? "text-red-400" : "text-ink-faint"}`}>
-        {bpsSum} / 10000 bps ({(bpsSum / 100).toFixed(2)}%) {over && "— exceeds 100%"}
+        {bpsSum} / 10000 bps ({(bpsSum / 100).toFixed(2)}%) {over && "(exceeds 100%)"}
       </p>
     </div>
   );

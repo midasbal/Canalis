@@ -192,20 +192,30 @@
     }
   }
 
-  /* Canalis brand: deep slate canvas, violet "channel" accent. */
-  --color-canvas: #0a0b0f;
-  --color-surface: #121319;
-  --color-surface-raised: #191b23;
-  --color-border: #262832;
-  --color-border-soft: #1c1e27;
+  /*
+   * Slice 1 restyle: these "old" chrome tokens (canvas/surface/border/ink/
+   * accent) now just point at the brand-* palette above, so every
+   * not-yet-migrated view (builder blocks, dashboard internals) that still
+   * reads them adopts the new look immediately instead of clashing with
+   * the restyled shell during the intermediate slices. A later slice
+   * replaces these usages with brand-* classes directly and retires this
+   * bridge. Category colors (trigger/condition/action below) are left
+   * alone deliberately — they're functional block-type signals, not
+   * general chrome, and are in scope for the builder-detail slice.
+   */
+  --color-canvas: var(--color-brand-base);
+  --color-surface: var(--color-brand-surface);
+  --color-surface-raised: color-mix(in oklab, var(--color-brand-surface) 100%, white 4%);
+  --color-border: color-mix(in oklab, var(--color-brand-bronze) 18%, var(--color-brand-base-alt));
+  --color-border-soft: color-mix(in oklab, var(--color-brand-bronze) 10%, var(--color-brand-base-alt));
 
-  --color-ink: #f2f2f5;
-  --color-ink-muted: #9a9ca8;
-  --color-ink-faint: #62636e;
+  --color-ink: var(--color-brand-ink);
+  --color-ink-muted: var(--color-brand-muted);
+  --color-ink-faint: color-mix(in oklab, var(--color-brand-muted) 55%, var(--color-brand-base));
 
-  --color-accent: #8b6bff;
-  --color-accent-soft: #8b6bff1a;
-  --color-accent-strong: #a78bfa;
+  --color-accent: var(--color-brand-violet);
+  --color-accent-soft: color-mix(in oklab, var(--color-brand-violet) 15%, transparent);
+  --color-accent-strong: var(--color-brand-violet-soft);
 
   /* Block category colors — trigger / condition / action must read apart at a glance. */
   --color-trigger: #38bdf8;
@@ -244,10 +254,7 @@
   }
 
   body {
-    @apply bg-canvas text-ink font-sans antialiased;
-    background-image: radial-gradient(circle at 12% 0%, color-mix(in oklab, var(--color-accent) 14%, transparent), transparent 45%),
-      radial-gradient(circle at 88% 15%, color-mix(in oklab, var(--color-trigger) 10%, transparent), transparent 40%);
-    background-attachment: fixed;
+    @apply bg-brand-base text-brand-ink font-sans antialiased;
   }
 
   /* Every animation in this file (existing fade/rise-in, and the landing's

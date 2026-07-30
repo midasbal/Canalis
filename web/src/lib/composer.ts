@@ -505,7 +505,7 @@ export function validateComposerDraft(
       }
       const minAmountOut = parseUsdcSafe(a.swapMinAmountOut);
       if (minAmountOut === null || minAmountOut <= 0n) {
-        errors.push(`${label}: minimum received must be a valid amount greater than 0 — real slippage protection, not zero.`);
+        errors.push(`${label}: minimum received must be a valid amount greater than 0. Real slippage protection, not zero.`);
       }
     }
     if (a.kind === ActionType.Bridge) {

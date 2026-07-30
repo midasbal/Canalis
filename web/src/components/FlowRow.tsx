@@ -111,7 +111,7 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-red-400">
-            Couldn't load flow #{flowId.toString()} — {getRevertReason(flowQuery.error)}
+            Couldn't load flow #{flowId.toString()}. {getRevertReason(flowQuery.error)}
           </p>
           <button
             onClick={() => flowQuery.refetch()}
@@ -168,7 +168,7 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
         // fails, executeFlow is never called — surfacing a stale/failed
         // refresh honestly rather than trying (and reverting) anyway.
         if (!CANALIS_ORACLE_ADDRESS || !publicClient) {
-          throw new Error("Oracle not configured (VITE_ORACLE_ADDRESS) — can't refresh the price.");
+          throw new Error("Oracle not configured (VITE_ORACLE_ADDRESS). Can't refresh the price.");
         }
         setRunStep("refreshing");
         const updateData = await fetchHermesUpdate(oraclePriceIds);

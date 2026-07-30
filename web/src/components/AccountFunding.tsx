@@ -89,7 +89,7 @@ export function AccountFunding() {
 
   if (!CONTRACTS_CONFIGURED) {
     return (
-      <Card eyebrow="Account funding" title="Deposit &amp; withdraw USDC" action={<Badge tone="warning">Not configured</Badge>}>
+      <Card eyebrow="Account funding" title="Deposit & withdraw USDC" variant="flat" action={<Badge tone="warning">Not configured</Badge>}>
         <p className="text-sm text-ink-muted">
           Set <code className="font-mono text-ink">VITE_CANALIS_ACCOUNT_FACTORY_ADDRESS</code> and{" "}
           <code className="font-mono text-ink">VITE_USDC_ADDRESS</code> in <code>web/.env</code>.
@@ -100,7 +100,7 @@ export function AccountFunding() {
 
   if (!isConnected) {
     return (
-      <Card eyebrow="Account funding" title="Deposit &amp; withdraw USDC">
+      <Card eyebrow="Account funding" title="Deposit & withdraw USDC" variant="flat">
         <p className="text-sm text-ink-muted">Connect a wallet to fund your account.</p>
       </Card>
     );
@@ -108,7 +108,7 @@ export function AccountFunding() {
 
   if (accountLoading) {
     return (
-      <Card eyebrow="Account funding" title="Deposit &amp; withdraw USDC">
+      <Card eyebrow="Account funding" title="Deposit & withdraw USDC" variant="flat">
         <p className="text-sm text-ink-muted">Checking for your Canalis account…</p>
       </Card>
     );
@@ -116,7 +116,7 @@ export function AccountFunding() {
 
   if (!hasAccount) {
     return (
-      <Card eyebrow="Account funding" title="Deposit &amp; withdraw USDC">
+      <Card eyebrow="Account funding" title="Deposit & withdraw USDC" variant="flat">
         <CreateCanalisAccountPrompt message="You need a CanalisAccount before you can deposit funds." />
       </Card>
     );
@@ -177,7 +177,7 @@ export function AccountFunding() {
   }
 
   return (
-    <Card eyebrow="Account funding" title="Deposit & withdraw USDC">
+    <Card eyebrow="Account funding" title="Deposit & withdraw USDC" variant="flat">
       <p className="mb-1 text-xs text-ink-faint">CanalisAccount</p>
       <a
         href={arcscanAddressUrl(accountAddress!)}
@@ -238,7 +238,7 @@ export function AccountFunding() {
         {approveTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(approveTx.error)}</p>}
         {depositTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(depositTx.error)}</p>}
         {depositReceipt.isSuccess && (
-          <p className="mt-2 text-xs text-emerald-400">Deposited — balances refreshed.</p>
+          <p className="mt-2 text-xs text-emerald-400">Deposited. Balances refreshed.</p>
         )}
       </div>
 
@@ -265,7 +265,7 @@ export function AccountFunding() {
         </div>
         {withdrawTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(withdrawTx.error)}</p>}
         {withdrawReceipt.isSuccess && (
-          <p className="mt-2 text-xs text-emerald-400">Withdrawn — balances refreshed.</p>
+          <p className="mt-2 text-xs text-emerald-400">Withdrawn. Balances refreshed.</p>
         )}
       </div>
     </Card>

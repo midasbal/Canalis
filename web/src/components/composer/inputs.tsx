@@ -1,6 +1,7 @@
 import type { InputHTMLAttributes } from "react";
 
-const inputClass = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink";
+const inputClass =
+  "w-full rounded-lg border border-brand-bronze/20 bg-brand-surface px-3 py-2 text-sm text-brand-ink placeholder:text-brand-muted/50 focus:outline-none focus:ring-1 focus:ring-brand-violet/50 focus:border-brand-violet/40";
 const monoInputClass = `${inputClass} font-mono`;
 
 interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -12,7 +13,7 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
 export function Field({ label, mono, className, ...inputProps }: FieldProps) {
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-ink-muted">{label}</span>
+      <span className="mb-1 block text-brand-muted">{label}</span>
       <input className={`${mono ? monoInputClass : inputClass} ${className ?? ""}`} {...inputProps} />
     </label>
   );
@@ -36,7 +37,7 @@ export function RemoveButton({ onClick, label }: { onClick: () => void; label: s
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="rounded-lg border border-border px-2 py-1 text-xs text-ink-faint transition-colors duration-200 hover:border-red-400/40 hover:text-red-400"
+      className="rounded-lg border border-brand-bronze/20 px-2 py-1 text-xs text-brand-muted/70 transition-colors duration-200 hover:border-red-400/40 hover:text-red-400"
     >
       Remove
     </button>

@@ -71,7 +71,7 @@ export function TriggerSection({ trigger, onChange }: TriggerSectionProps) {
             />
           )}
           <Field
-            label="Repeat every (seconds) — blank or 0 for one-time"
+            label="Repeat every (seconds), blank or 0 for one-time"
             value={trigger.intervalSeconds}
             onChange={(e) => onChange({ ...trigger, intervalSeconds: e.target.value })}
             placeholder="e.g. 3600 for hourly"
@@ -83,24 +83,24 @@ export function TriggerSection({ trigger, onChange }: TriggerSectionProps) {
       {trigger.kind === TriggerType.OnThreshold && (
         <div className="rounded-xl border border-border-soft bg-surface/50 p-4">
           <AmountField
-            label="Threshold amount (USDC) — fires when balance is ≥ this"
+            label="Threshold amount (USDC), fires when balance is at or above this"
             value={trigger.thresholdAmount}
             onChange={(e) => onChange({ ...trigger, thresholdAmount: e.target.value })}
           />
           <p className="mt-2 text-xs text-ink-faint">
-            Only the "at or above" direction is supported by the engine — there's no "below" option.
+            Only the "at or above" direction is supported by the engine. There is no "below" option.
           </p>
         </div>
       )}
 
       {trigger.kind === TriggerType.OnReceive && (
-        <p className="text-xs text-ink-faint">
-          No extra fields — this flow becomes eligible to run once, each time new USDC is deposited into the account.
+        <p className="max-w-prose text-xs text-ink-faint">
+          No extra fields. This flow becomes eligible to run once, each time new USDC is deposited into the account.
         </p>
       )}
 
       {trigger.kind === TriggerType.Manual && (
-        <p className="text-xs text-ink-faint">No extra fields — only you can run this, from the deployed-flows list.</p>
+        <p className="text-xs text-ink-faint">No extra fields. Only you can run this, from the deployed-flows list.</p>
       )}
     </div>
   );
