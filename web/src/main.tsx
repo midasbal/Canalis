@@ -5,6 +5,7 @@ import { WagmiProvider } from "wagmi";
 import "./index.css";
 import App from "./App.tsx";
 import { wagmiConfig } from "./wagmi";
+import { ToastProvider } from "./components/ui/ToastProvider";
 
 // The RPC transport (lib/rateLimitedTransport.ts) already retries
 // rate-limited/timed-out reads with backoff — keep react-query's own retry
@@ -18,7 +19,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </QueryClientProvider>
     </WagmiProvider>
   </StrictMode>,

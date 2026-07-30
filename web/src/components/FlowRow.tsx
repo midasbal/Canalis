@@ -8,9 +8,10 @@ import { CANALIS_EXECUTOR_ADDRESS, CANALIS_ORACLE_ADDRESS } from "../lib/contrac
 import { PRICE_ID_UNSET, SCHEDULE_NEVER_AGAIN, TriggerType, type Flow } from "../lib/flows";
 import { fetchHermesUpdate } from "../lib/oracleRefresh";
 import { arcscanTxUrl, formatCountdown } from "../lib/format";
-import { getRevertReason } from "../lib/errors";
+import { getFriendlyErrorMessage, getRevertReason } from "../lib/errors";
 import { summarizeFlow, triggerTypeLabel } from "../lib/flowSummary";
 import { useNowSeconds } from "../lib/useNowSeconds";
+import { useToast } from "./ui/ToastProvider";
 
 interface FlowRowProps {
   flowId: bigint;
@@ -35,6 +36,7 @@ interface FlowRowProps {
  */
 export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }: FlowRowProps) {
   const now = useNowSeconds(1000);
+  const toast = useToast();
 
   const flowQuery = useReadContract({
     address: CANALIS_EXECUTOR_ADDRESS,
@@ -76,7 +78,6 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
   // refresh failure/pending-state doesn't get confused with executeFlow's.
   const refreshPriceTx = useWriteContract();
   const [runStep, setRunStep] = useState<"idle" | "refreshing" | "running">("idle");
-  const [runStepError, setRunStepError] = useState<unknown>(null);
 
   const runTx = useWriteContract();
   const runReceipt = useWaitForTransactionReceipt({ hash: runTx.data });
@@ -138,17 +139,27 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
   async function handleToggleActive() {
     if (!CANALIS_EXECUTOR_ADDRESS || pausingRef.current) return;
     pausingRef.current = true;
+    const willBeActive = !flow.active;
+    const toastId = toast.push({ kind: "pending", title: `${willBeActive ? "Resuming" : "Pausing"} flow #${flowId.toString()}…` });
     try {
-      await pauseTx.writeContractAsync({
+      const hash = await pauseTx.writeContractAsync({
         address: CANALIS_EXECUTOR_ADDRESS,
         abi: canalisExecutorAbi,
         functionName: "setFlowActive",
-        args: [flowId, !flow.active],
+        args: [flowId, willBeActive],
       });
-    } catch {
-      // Surfaced via pauseTx.error below — swallow here so a rejection
-      // (e.g. the wallet popup being dismissed) never reaches the console
-      // as an unhandled promise rejection.
+      if (publicClient) await publicClient.waitForTransactionReceipt({ hash });
+      toast.update(toastId, {
+        kind: "success",
+        title: `Flow #${flowId.toString()} ${willBeActive ? "resumed" : "paused"}`,
+        action: { label: "View on arcscan", href: arcscanTxUrl(hash) },
+      });
+    } catch (err) {
+      toast.update(toastId, {
+        kind: "error",
+        title: `Couldn't ${willBeActive ? "resume" : "pause"} flow #${flowId.toString()}`,
+        detail: getFriendlyErrorMessage(err),
+      });
     } finally {
       pausingRef.current = false;
     }
@@ -157,7 +168,7 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
   async function handleRunNow() {
     if (!CANALIS_EXECUTOR_ADDRESS || runningRef.current) return;
     runningRef.current = true;
-    setRunStepError(null);
+    const toastId = toast.push({ kind: "pending", title: `Running flow #${flowId.toString()}…` });
     try {
       if (oraclePriceIds.length > 0) {
         // Oracle-conditioned flow: only the keeper normally keeps the
@@ -171,6 +182,7 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
           throw new Error("Oracle not configured (VITE_ORACLE_ADDRESS). Can't refresh the price.");
         }
         setRunStep("refreshing");
+        toast.update(toastId, { title: "Refreshing oracle price…" });
         const updateData = await fetchHermesUpdate(oraclePriceIds);
         const fee = await publicClient.readContract({
           address: CANALIS_ORACLE_ADDRESS,
@@ -189,18 +201,23 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
       }
 
       setRunStep("running");
-      await runTx.writeContractAsync({
+      toast.update(toastId, { title: `Running flow #${flowId.toString()}…` });
+      const runHash = await runTx.writeContractAsync({
         address: CANALIS_EXECUTOR_ADDRESS,
         abi: canalisExecutorAbi,
         functionName: "executeFlow",
         args: [flowId],
       });
+      if (publicClient) await publicClient.waitForTransactionReceipt({ hash: runHash });
+      toast.update(toastId, {
+        kind: "success",
+        title: `Ran flow #${flowId.toString()}`,
+        action: { label: "View on arcscan", href: arcscanTxUrl(runHash) },
+      });
     } catch (err) {
       // Covers a failed Hermes fetch, a rejected/reverted updatePriceFeeds,
-      // or a failed/rejected executeFlow — surfaced below via runStepError
-      // (own state, not just runTx.error, since the refresh step uses a
-      // separate write hook).
-      setRunStepError(err);
+      // or a failed/rejected executeFlow.
+      toast.update(toastId, { kind: "error", title: `Couldn't run flow #${flowId.toString()}`, detail: getFriendlyErrorMessage(err) });
     } finally {
       runningRef.current = false;
       setRunStep("idle");
@@ -264,40 +281,6 @@ export function FlowRow({ flowId, walletAddress, previewRefreshTick, onChanged }
         )}
       </div>
 
-      {Boolean(pauseTx.error || runStepError) && (
-        <p className="mt-2 text-xs text-red-400">{getRevertReason(pauseTx.error ?? runStepError)}</p>
-      )}
-
-      {refreshPriceTx.data && (
-        <a
-          href={arcscanTxUrl(refreshPriceTx.data)}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-block text-xs text-accent-strong underline underline-offset-2"
-        >
-          View oracle price refresh on arcscan
-        </a>
-      )}
-      {runReceipt.isSuccess && runReceipt.data && (
-        <a
-          href={arcscanTxUrl(runReceipt.data.transactionHash)}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 ml-3 inline-block text-xs text-accent-strong underline underline-offset-2"
-        >
-          View run on arcscan
-        </a>
-      )}
-      {pauseReceipt.isSuccess && pauseReceipt.data && (
-        <a
-          href={arcscanTxUrl(pauseReceipt.data.transactionHash)}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 ml-3 inline-block text-xs text-accent-strong underline underline-offset-2"
-        >
-          View on arcscan
-        </a>
-      )}
     </Card>
   );
 }

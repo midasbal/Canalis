@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
 import { Card } from "./ui/Card";
@@ -7,8 +7,9 @@ import { CreateCanalisAccountPrompt } from "./CreateCanalisAccountPrompt";
 import { useCanalisAccount } from "../lib/useCanalisAccount";
 import { canalisAccountAbi, erc20Abi } from "../lib/abi";
 import { CANALIS_ACCOUNT_FACTORY_ADDRESS, CANALIS_USDC_ADDRESS } from "../lib/contracts";
-import { arcscanAddressUrl } from "../lib/format";
-import { getRevertReason } from "../lib/errors";
+import { arcscanAddressUrl, arcscanTxUrl } from "../lib/format";
+import { getFriendlyErrorMessage } from "../lib/errors";
+import { useToast } from "./ui/ToastProvider";
 
 /** Arc testnet USDC's ERC-20 decimals — do not confuse with the 18-decimal native gas token. */
 const USDC_DECIMALS = 6;
@@ -25,9 +26,18 @@ const CONTRACTS_CONFIGURED = Boolean(CANALIS_ACCOUNT_FACTORY_ADDRESS && CANALIS_
 export function AccountFunding() {
   const { isConnected, address: walletAddress } = useAccount();
   const { accountAddress, hasAccount, isLoading: accountLoading } = useCanalisAccount();
+  const toast = useToast();
 
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  // Toast messages read the submitted amount after the input's own state is
+  // cleared on success (see the deposit/withdraw success effects below), so
+  // each amount is captured here at submit time, not read live from state.
+  const depositAmountRef = useRef("");
+  const withdrawAmountRef = useRef("");
+  const approveToastRef = useRef<string | null>(null);
+  const depositToastRef = useRef<string | null>(null);
+  const withdrawToastRef = useRef<string | null>(null);
 
   const walletBalance = useReadContract({
     address: CANALIS_USDC_ADDRESS,
@@ -86,6 +96,49 @@ export function AccountFunding() {
       setWithdrawAmount("");
     }
   }, [withdrawReceipt.isSuccess, refetchAccountBalance, refetchWalletBalance]);
+
+  useEffect(() => {
+    if (!approveToastRef.current) return;
+    if (approveReceipt.isSuccess) {
+      toast.update(approveToastRef.current, { kind: "success", title: "USDC approved", detail: "You can deposit now." });
+      approveToastRef.current = null;
+    } else if (approveTx.error) {
+      toast.update(approveToastRef.current, { kind: "error", title: "Approval failed", detail: getFriendlyErrorMessage(approveTx.error) });
+      approveToastRef.current = null;
+    }
+  }, [approveReceipt.isSuccess, approveTx.error, toast]);
+
+  useEffect(() => {
+    if (!depositToastRef.current) return;
+    if (depositReceipt.isSuccess && depositReceipt.data) {
+      toast.update(depositToastRef.current, {
+        kind: "success",
+        title: <>Deposited <span className="font-mono">{depositAmountRef.current}</span> USDC</>,
+        detail: "Balances refreshed.",
+        action: { label: "View on arcscan", href: arcscanTxUrl(depositReceipt.data.transactionHash) },
+      });
+      depositToastRef.current = null;
+    } else if (depositTx.error) {
+      toast.update(depositToastRef.current, { kind: "error", title: "Deposit failed", detail: getFriendlyErrorMessage(depositTx.error) });
+      depositToastRef.current = null;
+    }
+  }, [depositReceipt.isSuccess, depositReceipt.data, depositTx.error, toast]);
+
+  useEffect(() => {
+    if (!withdrawToastRef.current) return;
+    if (withdrawReceipt.isSuccess && withdrawReceipt.data) {
+      toast.update(withdrawToastRef.current, {
+        kind: "success",
+        title: <>Withdrew <span className="font-mono">{withdrawAmountRef.current}</span> USDC</>,
+        detail: "Balances refreshed.",
+        action: { label: "View on arcscan", href: arcscanTxUrl(withdrawReceipt.data.transactionHash) },
+      });
+      withdrawToastRef.current = null;
+    } else if (withdrawTx.error) {
+      toast.update(withdrawToastRef.current, { kind: "error", title: "Withdrawal failed", detail: getFriendlyErrorMessage(withdrawTx.error) });
+      withdrawToastRef.current = null;
+    }
+  }, [withdrawReceipt.isSuccess, withdrawReceipt.data, withdrawTx.error, toast]);
 
   if (!CONTRACTS_CONFIGURED) {
     return (
@@ -148,6 +201,7 @@ export function AccountFunding() {
 
   function handleApprove() {
     if (!accountAddress || parsedDeposit <= 0n) return;
+    approveToastRef.current = toast.push({ kind: "pending", title: "Approving USDC…" });
     approveTx.writeContract({
       address: CANALIS_USDC_ADDRESS!,
       abi: erc20Abi,
@@ -158,6 +212,8 @@ export function AccountFunding() {
 
   function handleDeposit() {
     if (!accountAddress || parsedDeposit <= 0n) return;
+    depositAmountRef.current = depositAmount;
+    depositToastRef.current = toast.push({ kind: "pending", title: `Depositing ${depositAmount} USDC…` });
     depositTx.writeContract({
       address: accountAddress,
       abi: canalisAccountAbi,
@@ -168,6 +224,8 @@ export function AccountFunding() {
 
   function handleWithdraw() {
     if (!accountAddress || !walletAddress || parsedWithdraw <= 0n) return;
+    withdrawAmountRef.current = withdrawAmount;
+    withdrawToastRef.current = toast.push({ kind: "pending", title: `Withdrawing ${withdrawAmount} USDC…` });
     withdrawTx.writeContract({
       address: accountAddress,
       abi: canalisAccountAbi,
@@ -235,11 +293,6 @@ export function AccountFunding() {
         </div>
 
         {exceedsWalletBalance && <p className="mt-2 text-xs text-red-400">Amount exceeds your wallet balance.</p>}
-        {approveTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(approveTx.error)}</p>}
-        {depositTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(depositTx.error)}</p>}
-        {depositReceipt.isSuccess && (
-          <p className="mt-2 text-xs text-emerald-400">Deposited. Balances refreshed.</p>
-        )}
       </div>
 
       <div className="mt-5 border-t border-border-soft pt-4">
@@ -263,10 +316,6 @@ export function AccountFunding() {
             {withdrawing ? "Withdrawing…" : "Withdraw"}
           </button>
         </div>
-        {withdrawTx.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(withdrawTx.error)}</p>}
-        {withdrawReceipt.isSuccess && (
-          <p className="mt-2 text-xs text-emerald-400">Withdrawn. Balances refreshed.</p>
-        )}
       </div>
     </Card>
   );

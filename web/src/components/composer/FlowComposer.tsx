@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { decodeEventLog } from "viem";
 import { Card } from "../ui/Card";
@@ -9,12 +9,13 @@ import { useCanalisAccount } from "../../lib/useCanalisAccount";
 import { canalisExecutorAbi } from "../../lib/abi";
 import { CANALIS_ACCOUNT_FACTORY_ADDRESS, CANALIS_EXECUTOR_ADDRESS } from "../../lib/contracts";
 import { arcscanTxUrl } from "../../lib/format";
-import { getRevertReason } from "../../lib/errors";
+import { getFriendlyErrorMessage } from "../../lib/errors";
 import { summarizeFlow } from "../../lib/flowSummary";
 import { defaultDraft, draftToFlow, validateComposerDraft, type ComposerDraft } from "../../lib/composer";
 import { ChannelCanvas } from "./ChannelCanvas";
 import { TemplatePicker } from "./TemplatePicker";
 import { NlBuilderPanel } from "./NlBuilderPanel";
+import { useToast } from "../ui/ToastProvider";
 
 const CONTRACTS_CONFIGURED = Boolean(CANALIS_EXECUTOR_ADDRESS && CANALIS_ACCOUNT_FACTORY_ADDRESS);
 
@@ -30,10 +31,11 @@ const CONTRACTS_CONFIGURED = Boolean(CANALIS_EXECUTOR_ADDRESS && CANALIS_ACCOUNT
 export function FlowComposer() {
   const { isConnected, address: walletAddress } = useAccount();
   const { accountAddress, hasAccount, isLoading: accountLoading } = useCanalisAccount();
+  const toast = useToast();
+  const deployToastRef = useRef<string | null>(null);
 
   const [draft, setDraft] = useState<ComposerDraft>(defaultDraft());
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [registeredFlowId, setRegisteredFlowId] = useState<bigint | null>(null);
   const [aiDraftActive, setAiDraftActive] = useState(false);
 
   const registerFlow = useWriteContract();
@@ -41,19 +43,35 @@ export function FlowComposer() {
 
   useEffect(() => {
     if (!registerFlowReceipt.isSuccess || !registerFlowReceipt.data) return;
+    let flowId: bigint | null = null;
     for (const log of registerFlowReceipt.data.logs) {
       try {
         const decoded = decodeEventLog({ abi: canalisExecutorAbi, data: log.data, topics: log.topics });
         if (decoded.eventName === "FlowRegistered") {
-          setRegisteredFlowId(decoded.args.flowId);
-          return;
+          flowId = decoded.args.flowId;
+          break;
         }
       } catch {
         // Not a FlowRegistered log — skip.
       }
     }
+    if (deployToastRef.current) {
+      toast.update(deployToastRef.current, {
+        kind: "success",
+        title: flowId !== null ? `Flow #${flowId.toString()} deployed` : "Flow deployed",
+        detail: 'Switch to the Flows tab to see it in "Deployed flows".',
+        action: { label: "View on arcscan", href: arcscanTxUrl(registerFlowReceipt.data.transactionHash) },
+      });
+      deployToastRef.current = null;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registerFlowReceipt.isSuccess, registerFlowReceipt.data]);
+
+  useEffect(() => {
+    if (!deployToastRef.current || !registerFlow.error) return;
+    toast.update(deployToastRef.current, { kind: "error", title: "Couldn't deploy flow", detail: getFriendlyErrorMessage(registerFlow.error) });
+    deployToastRef.current = null;
+  }, [registerFlow.error, toast]);
 
   if (!CONTRACTS_CONFIGURED) {
     return (
@@ -98,7 +116,7 @@ export function FlowComposer() {
 
   function handleDeploy() {
     if (!accountAddress || !valid) return;
-    setRegisteredFlowId(null);
+    deployToastRef.current = toast.push({ kind: "pending", title: "Deploying flow…" });
     registerFlow.writeContract({
       address: CANALIS_EXECUTOR_ADDRESS!,
       abi: canalisExecutorAbi,
@@ -111,7 +129,6 @@ export function FlowComposer() {
     setDraft(defaultDraft());
     setSelectedTemplateId(null);
     setAiDraftActive(false);
-    setRegisteredFlowId(null);
     registerFlow.reset();
   }
 
@@ -217,25 +234,6 @@ export function FlowComposer() {
             Reset
           </button>
         </div>
-
-        {registerFlow.error && <p className="mt-2 text-xs text-red-400">{getRevertReason(registerFlow.error)}</p>}
-
-        {registeredFlowId !== null && registerFlowReceipt.data && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-            <Badge tone="accent">Deployed</Badge>
-            <span className="text-ink-muted">
-              Flow #{registeredFlowId.toString()} registered. Switch to the Flows tab to see it in "Deployed flows".
-            </span>
-            <a
-              href={arcscanTxUrl(registerFlowReceipt.data.transactionHash)}
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent-strong underline underline-offset-2"
-            >
-              View on arcscan
-            </a>
-          </div>
-        )}
       </Card>
     </div>
   );
