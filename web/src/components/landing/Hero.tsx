@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Logo } from "../ui/Logo";
 import { RotatingWord } from "./RotatingWord";
-import { useReducedMotion } from "./useReducedMotion";
+import { useReducedMotion } from "../../lib/useReducedMotion";
 
 interface HeroProps {
   onEnter: () => void;
@@ -160,7 +160,7 @@ export function Hero({ onEnter, entering }: HeroProps) {
               your own on-chain vault, and your money routes, swaps, and settles itself.
             </p>
 
-            <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div className="mt-10">
               <button
                 onClick={onEnter}
                 disabled={entering}
@@ -168,24 +168,41 @@ export function Hero({ onEnter, entering }: HeroProps) {
               >
                 {entering ? "Connecting…" : "Enter Canalis"}
               </button>
-              <a
-                href="#how-it-works"
-                className="text-sm font-medium text-brand-muted underline decoration-brand-bronze/40 underline-offset-4 transition-colors duration-200 hover:text-brand-ink"
-              >
-                How it works
-              </a>
-              <a
-                href="https://github.com/midasbal/Canalis"
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm font-medium text-brand-muted underline decoration-brand-bronze/40 underline-offset-4 transition-colors duration-200 hover:text-brand-ink"
-              >
-                GitHub
-              </a>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Quiet scroll hint, bottom-center of the hero (the conventional scroll-cue spot) so it reads as ambient
+          orientation rather than competing with the left-aligned headline/CTA above. Deliberately not styled as a
+          second button (no border/fill) so "Enter Canalis" stays the only real CTA. Sits inside the bottom
+          vignette's darkened band for legibility over the artwork, with its own small backing on hover/focus only. */}
+      <a
+        href="#how-it-works"
+        onClick={(e) => {
+          e.preventDefault();
+          document.getElementById("how-it-works")?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+        }}
+        className="absolute bottom-5 left-1/2 z-10 -translate-x-1/2 rounded-md px-3 py-1.5 text-brand-ink/75 transition-colors duration-200 hover:text-brand-ink focus-visible:text-brand-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-violet/50 sm:bottom-8"
+      >
+        <span className="flex flex-col items-center gap-1.5">
+          <span className="font-mono text-[10px] font-medium tracking-[0.16em] uppercase">Follow the channel</span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={`text-brand-violet/85 ${reducedMotion ? "" : "animate-scroll-hint"}`}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </a>
     </section>
   );
 }

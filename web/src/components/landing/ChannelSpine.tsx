@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useReducedMotion } from "./useReducedMotion";
+import { useReducedMotion } from "../../lib/useReducedMotion";
 
 /**
  * The single continuous vertical "conduit" running down the whole landing

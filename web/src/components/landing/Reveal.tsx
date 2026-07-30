@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useReducedMotion } from "./useReducedMotion";
+import { useReducedMotion } from "../../lib/useReducedMotion";
 
 interface RevealProps {
   children: ReactNode;

@@ -186,6 +186,7 @@ export function FlowComposer() {
           onConditionsChange={(conditions) => setDraft({ ...draft, conditions })}
           actions={draft.actions}
           onActionsChange={(actions) => setDraft({ ...draft, actions })}
+          valid={valid}
         />
       </Card>
 

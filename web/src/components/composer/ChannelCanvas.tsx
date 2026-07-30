@@ -15,6 +15,7 @@ import {
 import { triggerTypeLabel } from "../../lib/flowSummary";
 import { actionNodeSummary, conditionNodeSummary, triggerNodeSummary } from "../../lib/nodeSummary";
 import { shortAddress } from "../../lib/format";
+import { useReducedMotion } from "../../lib/useReducedMotion";
 import { ACTION_ICONS, CONDITION_ICONS, TRIGGER_ICONS } from "../ui/blockIcons";
 import { CloseIcon } from "../ui/icons";
 import { TriggerSection } from "./TriggerSection";
@@ -36,7 +37,19 @@ interface ChannelCanvasProps {
   onConditionsChange: (conditions: ComposerCondition[]) => void;
   actions: ComposerAction[];
   onActionsChange: (actions: ComposerAction[]) => void;
+  /**
+   * Whether the CURRENT draft is deployable, i.e. `validateComposerDraft(...)
+   * .length === 0` — the exact same signal FlowComposer already computes to
+   * enable/disable its Deploy button. Passed straight through, never
+   * recomputed here: this view never re-derives or duplicates validation,
+   * it only reads the existing result to decide how far the ambient "value"
+   * animation travels.
+   */
+  valid: boolean;
 }
+
+/** Seconds between one connector's traveling dot and the next's, via negative animation-delay, so a chain of connectors reads as one continuous traveler instead of N independently-looping dots. */
+const STAGGER_SECONDS = 0.4;
 
 /**
  * The builder's signature surface: the current ComposerDraft (the SAME
@@ -52,6 +65,14 @@ interface ChannelCanvasProps {
  * ActionCard exported from their section files unmodified) inside a side
  * panel, and never touches lib/composer.ts's draft model, validation, or
  * lib/flows.ts's Flow encoding.
+ *
+ * The ambient "value" animation is presentation only, driven entirely by
+ * the `valid` prop: the source-and-gates portion
+ * (trigger, conditions, the "Add gate" affordance) always shows the
+ * traveling glow, since a flow always has a trigger; the outlet portion
+ * (actions, Split's branches, the "Add outlet" affordance) only lights up
+ * and completes the traveling animation when `valid` is true, otherwise it
+ * renders dim and static, no new validation logic involved.
  */
 export function ChannelCanvas({
   trigger,
@@ -60,8 +81,10 @@ export function ChannelCanvas({
   onConditionsChange,
   actions,
   onActionsChange,
+  valid,
 }: ChannelCanvasProps) {
   const [selected, setSelected] = useState<Selected>(null);
+  const reducedMotion = useReducedMotion();
 
   function removeCondition(id: string) {
     onConditionsChange(conditions.filter((c) => c.id !== id));
@@ -73,6 +96,13 @@ export function ChannelCanvas({
     if (selected?.type === "action" && selected.id === id) setSelected(null);
   }
 
+  // Zone A (source + gates) is always lit; zone B (outlets) only completes
+  // the flow when the draft is actually deployable. Each zone's connectors
+  // get their own 0,1,2... sequence so the staggered delay reads as one
+  // traveler per zone, regardless of how many gates/outlets exist.
+  let gateIndex = 0;
+  let outletIndex = 0;
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-0 overflow-x-auto pb-3">
@@ -83,44 +113,59 @@ export function ChannelCanvas({
           detail={triggerNodeSummary(trigger)}
           selected={selected?.type === "trigger"}
           onClick={() => setSelected({ type: "trigger" })}
+          dim={false}
+          reducedMotion={reducedMotion}
         />
-        <Connector />
+        <Connector index={gateIndex++} lit reducedMotion={reducedMotion} />
 
-        {conditions.map((c) => (
-          <Fragment key={c.id}>
-            <NodeCard
-              category="condition"
-              icon={CONDITION_ICONS[c.kind]}
-              title={CONDITION_KIND_LABELS[c.kind]}
-              detail={conditionNodeSummary(c)}
-              selected={selected?.type === "condition" && selected.id === c.id}
-              onClick={() => setSelected({ type: "condition", id: c.id })}
-              onRemove={() => removeCondition(c.id)}
-              removeLabel={`Remove ${CONDITION_KIND_LABELS[c.kind]} condition`}
-            />
-            <Connector />
-          </Fragment>
-        ))}
+        {conditions.map((c) => {
+          const thisGateIndex = gateIndex++;
+          return (
+            <Fragment key={c.id}>
+              <NodeCard
+                category="condition"
+                icon={CONDITION_ICONS[c.kind]}
+                title={CONDITION_KIND_LABELS[c.kind]}
+                detail={conditionNodeSummary(c)}
+                selected={selected?.type === "condition" && selected.id === c.id}
+                onClick={() => setSelected({ type: "condition", id: c.id })}
+                onRemove={() => removeCondition(c.id)}
+                removeLabel={`Remove ${CONDITION_KIND_LABELS[c.kind]} condition`}
+                dim={false}
+                gateGlowIndex={thisGateIndex}
+                reducedMotion={reducedMotion}
+              />
+              <Connector index={thisGateIndex} lit reducedMotion={reducedMotion} />
+            </Fragment>
+          );
+        })}
 
         <AddButton label="Add gate" hint="optional" onClick={() => setSelected({ type: "addCondition" })} />
-        <Connector />
+        <Connector index={outletIndex++} lit={valid} reducedMotion={reducedMotion} />
 
-        {actions.map((a) => (
-          <Fragment key={a.id}>
-            <NodeCard
-              category="action"
-              icon={ACTION_ICONS[a.kind]}
-              title={ACTION_KIND_LABELS[a.kind]}
-              detail={actionNodeSummary(a)}
-              selected={selected?.type === "action" && selected.id === a.id}
-              onClick={() => setSelected({ type: "action", id: a.id })}
-              onRemove={() => removeAction(a.id)}
-              removeLabel={`Remove ${ACTION_KIND_LABELS[a.kind]} action`}
-            />
-            {a.kind === ActionType.Split && <SplitBranches recipients={a.splitRecipients} />}
-            <Connector />
-          </Fragment>
-        ))}
+        {actions.map((a) => {
+          const thisOutletIndex = outletIndex++;
+          return (
+            <Fragment key={a.id}>
+              <NodeCard
+                category="action"
+                icon={ACTION_ICONS[a.kind]}
+                title={ACTION_KIND_LABELS[a.kind]}
+                detail={actionNodeSummary(a)}
+                selected={selected?.type === "action" && selected.id === a.id}
+                onClick={() => setSelected({ type: "action", id: a.id })}
+                onRemove={() => removeAction(a.id)}
+                removeLabel={`Remove ${ACTION_KIND_LABELS[a.kind]} action`}
+                dim={!valid}
+                reducedMotion={reducedMotion}
+              />
+              {a.kind === ActionType.Split && (
+                <SplitBranches recipients={a.splitRecipients} lit={valid} index={thisOutletIndex} reducedMotion={reducedMotion} />
+              )}
+              <Connector index={thisOutletIndex} lit={valid} reducedMotion={reducedMotion} />
+            </Fragment>
+          );
+        })}
 
         <AddButton label="Add outlet" onClick={() => setSelected({ type: "addAction" })} />
       </div>
@@ -207,21 +252,39 @@ function panelTitle(selected: NonNullable<Selected>, conditions: ComposerConditi
   }
 }
 
-function Connector() {
+function Connector({ index, lit, reducedMotion }: { index: number; lit: boolean; reducedMotion: boolean }) {
   return (
-    <div className="flex w-8 shrink-0 items-center sm:w-10" aria-hidden="true">
+    <div className="relative flex w-8 shrink-0 items-center sm:w-10" aria-hidden="true">
       <div
-        className="h-[2px] w-full rounded-full bg-brand-bronze/50"
-        style={{ boxShadow: "0 0 8px 0 color-mix(in oklab, var(--color-brand-violet) 45%, transparent)" }}
+        className={`h-[2px] w-full rounded-full transition-colors duration-500 ${lit ? "bg-brand-bronze/50" : "bg-brand-bronze/20"}`}
+        style={lit ? { boxShadow: "0 0 8px 0 color-mix(in oklab, var(--color-brand-violet) 45%, transparent)" } : undefined}
       />
+      {lit && !reducedMotion && (
+        <span
+          className="animate-channel-value absolute top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand-violet blur-[0.5px]"
+          style={{ animationDelay: `${-(index * STAGGER_SECONDS)}s` }}
+        />
+      )}
     </div>
   );
 }
 
-const CATEGORY_CLASSES: Record<"trigger" | "condition" | "action", { rest: string; selected: string }> = {
-  trigger: { rest: "border-trigger/30 bg-trigger-soft/40 hover:border-trigger/50", selected: "border-trigger/60 bg-trigger-soft" },
-  condition: { rest: "border-condition/30 bg-condition-soft/40 hover:border-condition/50", selected: "border-condition/60 bg-condition-soft" },
-  action: { rest: "border-action/30 bg-action-soft/40 hover:border-action/50", selected: "border-action/60 bg-action-soft" },
+const CATEGORY_CLASSES: Record<"trigger" | "condition" | "action", { rest: string; selected: string; dim: string }> = {
+  trigger: {
+    rest: "border-trigger/30 bg-trigger-soft/40 hover:border-trigger/50",
+    selected: "border-trigger/60 bg-trigger-soft",
+    dim: "border-trigger/15 bg-trigger-soft/15",
+  },
+  condition: {
+    rest: "border-condition/30 bg-condition-soft/40 hover:border-condition/50",
+    selected: "border-condition/60 bg-condition-soft",
+    dim: "border-condition/15 bg-condition-soft/15",
+  },
+  action: {
+    rest: "border-action/30 bg-action-soft/40 hover:border-action/50",
+    selected: "border-action/60 bg-action-soft",
+    dim: "border-action/15 bg-action-soft/15",
+  },
 };
 
 function NodeCard({
@@ -233,6 +296,9 @@ function NodeCard({
   onClick,
   onRemove,
   removeLabel,
+  dim,
+  gateGlowIndex,
+  reducedMotion,
 }: {
   category: "trigger" | "condition" | "action";
   icon: ComponentType;
@@ -242,16 +308,32 @@ function NodeCard({
   onClick: () => void;
   onRemove?: () => void;
   removeLabel?: string;
+  /** True when this node sits in a not-yet-complete part of the channel (the outlet zone while the draft isn't deployable) — a static, always-legible dim treatment, not just an animation toggle. */
+  dim: boolean;
+  /** Condition nodes only: their position in the gate sequence, so the "value passing through" glow staggers the same way the connectors do. */
+  gateGlowIndex?: number;
+  reducedMotion: boolean;
 }) {
   const classes = CATEGORY_CLASSES[category];
+  const tone = dim ? classes.dim : selected ? classes.selected : classes.rest;
+
   return (
     <div className="relative shrink-0">
+      {category === "condition" && (
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute -inset-1.5 -z-10 rounded-2xl bg-brand-violet-soft/30 blur-md ${
+            reducedMotion ? "opacity-35" : "animate-flow-gate-glow"
+          }`}
+          style={reducedMotion ? undefined : { animationDelay: `${-((gateGlowIndex ?? 0) * STAGGER_SECONDS)}s` }}
+        />
+      )}
       <button
         type="button"
         onClick={onClick}
         aria-pressed={selected}
-        className={`flex w-40 flex-col gap-1.5 rounded-xl border px-3.5 py-3 text-left transition-colors duration-200 sm:w-44 ${
-          selected ? classes.selected : classes.rest
+        className={`flex w-40 flex-col gap-1.5 rounded-xl border px-3.5 py-3 text-left transition-colors duration-500 sm:w-44 ${tone} ${
+          dim ? "opacity-70" : ""
         }`}
       >
         <span className="flex items-start justify-between gap-2">
@@ -281,19 +363,37 @@ function NodeCard({
   );
 }
 
-function SplitBranches({ recipients }: { recipients: ComposerAction["splitRecipients"] }) {
+function SplitBranches({
+  recipients,
+  lit,
+  index,
+  reducedMotion,
+}: {
+  recipients: ComposerAction["splitRecipients"];
+  lit: boolean;
+  index: number;
+  reducedMotion: boolean;
+}) {
   if (recipients.length === 0) return null;
   return (
     <div className="flex shrink-0 items-stretch" aria-hidden="true">
       <div className="flex w-5 items-center">
-        <div className="h-px w-full bg-brand-bronze/40" />
+        <div className={`h-px w-full ${lit ? "bg-brand-bronze/40" : "bg-brand-bronze/15"}`} />
       </div>
-      <div className="flex flex-col justify-center gap-1.5 border-l-2 border-brand-bronze/30 py-1 pl-3">
+      <div className={`flex flex-col justify-center gap-1.5 border-l-2 py-1 pl-3 ${lit ? "border-brand-bronze/30" : "border-brand-bronze/15"}`}>
         {recipients.map((r) => (
           <div
             key={r.id}
-            className="flex items-center gap-1.5 rounded-lg border border-action/20 bg-action-soft/40 px-2.5 py-1 text-xs whitespace-nowrap"
+            className={`relative flex items-center gap-1.5 overflow-hidden rounded-lg border px-2.5 py-1 text-xs whitespace-nowrap ${
+              lit ? "border-action/20 bg-action-soft/40" : "border-action/10 bg-action-soft/15 opacity-70"
+            }`}
           >
+            {lit && !reducedMotion && (
+              <span
+                className="animate-channel-value absolute top-1/2 left-0 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand-violet blur-[0.5px]"
+                style={{ animationDelay: `${-(index * STAGGER_SECONDS)}s` }}
+              />
+            )}
             <span className="font-mono text-ink-muted">{r.address.trim() ? shortAddress(r.address.trim()) : "…"}</span>
             <span className="text-ink-faint">{r.bps.trim() ? `${bpsStringToPercentText(r.bps)}%` : "…"}</span>
           </div>

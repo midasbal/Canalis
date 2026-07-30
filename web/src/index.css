@@ -193,6 +193,51 @@
   }
 
   /*
+   * Builder channel-canvas (ChannelCanvas.tsx): a small violet "value"
+   * traveling along each connector segment, left to right. `left` is
+   * animated (not `transform: translateX`) so the same keyframe works at
+   * any connector width, percentage-relative to that connector's own
+   * box — no per-instance sizing math needed. Each connector gets a
+   * negative animation-delay proportional to its position along the
+   * channel (see ChannelCanvas.tsx) so the dots read as one continuous
+   * traveler relayed segment to segment, not N independent loops
+   * ticking in lockstep.
+   */
+  --animate-channel-value: channel-value-travel 2.2s linear infinite;
+
+  @keyframes channel-value-travel {
+    0% {
+      left: -10%;
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      left: 110%;
+      opacity: 0;
+    }
+  }
+
+  /* Hero's quiet "Follow the channel" scroll hint — a small, slow bounce plus opacity breathe so it reads as a faint invitation, not an attention-grabbing control. */
+  --animate-scroll-hint: scroll-hint-bounce 2.4s ease-in-out infinite;
+
+  @keyframes scroll-hint-bounce {
+    0%,
+    100% {
+      transform: translateY(0);
+      opacity: 0.6;
+    }
+    50% {
+      transform: translateY(5px);
+      opacity: 1;
+    }
+  }
+
+  /*
    * Slice 1 restyle: these "old" chrome tokens (canvas/surface/border/ink/
    * accent) now just point at the brand-* palette above, so every
    * not-yet-migrated view (builder blocks, dashboard internals) that still

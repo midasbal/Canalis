@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useReducedMotion } from "./useReducedMotion";
+import { useReducedMotion } from "../../lib/useReducedMotion";
 
 const MOTE_COUNT = 20;
 

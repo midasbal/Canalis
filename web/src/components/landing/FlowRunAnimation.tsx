@@ -1,4 +1,4 @@
-import { useReducedMotion } from "./useReducedMotion";
+import { useReducedMotion } from "../../lib/useReducedMotion";
 
 /**
  * "Watch a flow run" — the centerpiece demonstration of "money that runs
