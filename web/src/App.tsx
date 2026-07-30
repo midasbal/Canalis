@@ -4,11 +4,13 @@ import { Sidebar, SidebarContent, type Tab } from "./components/Sidebar";
 import { MenuIcon, CloseIcon } from "./components/ui/icons";
 import { BuilderCanvas } from "./components/BuilderCanvas";
 import { Dashboard } from "./components/Dashboard";
+import { DocsPage } from "./components/docs/DocsPage";
 import { Landing } from "./components/landing/Landing";
 
 const TAB_LABELS: Record<Tab, string> = {
   builder: "Builder",
   dashboard: "Flows",
+  docs: "Docs",
 };
 
 function App() {
@@ -98,7 +100,13 @@ function App() {
         </header>
 
         <main key={tab} className="animate-fade-in flex-1 overflow-y-auto px-4 py-6 sm:px-6 md:px-8 md:py-8">
-          {tab === "builder" ? <BuilderCanvas /> : <Dashboard onGoToBuilder={() => handleTabChange("builder")} />}
+          {tab === "builder" ? (
+            <BuilderCanvas />
+          ) : tab === "dashboard" ? (
+            <Dashboard onGoToBuilder={() => handleTabChange("builder")} />
+          ) : (
+            <DocsPage />
+          )}
         </main>
       </div>
     </div>

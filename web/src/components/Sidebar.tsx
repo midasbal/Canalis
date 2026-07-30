@@ -9,13 +9,14 @@ import { canalisAccountAbi, erc20Abi } from "../lib/abi";
 import { CANALIS_EURC_ADDRESS } from "../lib/contracts";
 import { shortAddress } from "../lib/format";
 
-export type Tab = "builder" | "dashboard";
+export type Tab = "builder" | "dashboard" | "docs";
 
 const USDC_DECIMALS = 6;
 
 const NAV_ITEMS: { id: Tab; label: string }[] = [
   { id: "builder", label: "Builder" },
   { id: "dashboard", label: "Flows" },
+  { id: "docs", label: "Docs" },
 ];
 
 interface SidebarContentProps {
@@ -59,12 +60,6 @@ function SidebarContent({ tab, onTabChange, onLogoClick }: SidebarContentProps) 
             {label}
           </button>
         ))}
-        <span
-          className="cursor-default rounded-lg border border-transparent px-3 py-2 text-left text-sm font-medium text-brand-muted/40"
-          title="Coming soon"
-        >
-          Docs
-        </span>
       </nav>
 
       <div className="flex-1" />
