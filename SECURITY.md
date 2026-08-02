@@ -261,6 +261,73 @@ Stated plainly, not buried:
 
 ---
 
+## Static analysis (Slither)
+
+`contracts/src/` was run through [Slither](https://github.com/crytic/slither)
+(slither-analyzer 0.11.6), Trail of Bits' automated static analyzer, as an
+additional pass on top of the tests below. On the actual contract source
+(excluding the OpenZeppelin dependencies Slither also pulls in for
+context), it reported **0 High and 4 Medium** severity findings, plus a
+number of Low and Informational ones (see below). Separately, a hosted
+explorer badge (SolidityScan) shows a different, higher finding count for
+these contracts; that badge's severities are a heuristic automated score,
+not a manual audit, and are not reconciled against this Slither run.
+Stated plainly: Slither on the actual source found no High-severity
+issues. Neither tool is a substitute for a professional review, same as
+everything else in this file.
+
+### The 4 Medium findings
+
+- **Unchecked Pyth confidence interval
+  (`CanalisExecutor._checkOracleCondition`).** The oracle price condition
+  validates the price's sign and its staleness (`publishTime` against the
+  flow's own `maxStaleness`), but never checks Pyth's `conf` field, the
+  confidence interval the feed itself reports alongside the price. A flow
+  could act on a price the feed reports with low confidence, for example
+  during a volatile or thin-liquidity moment for the underlying market.
+  This is a genuine, previously undocumented limitation, not something
+  covered by the [oracle staleness + normalization](#protections-actually-in-the-code)
+  protection above. The impact is bounded: it affects which price a flow
+  acts on, not custody of funds, and on the major feeds Canalis uses
+  confidence is typically tight. **Not fixed in the current deployment**,
+  documented here rather than silently left out, the same way the
+  `setExecutor` trust boundary is handled above. **Planned mitigation:** a
+  future contract revision should add a confidence-interval check,
+  rejecting a price update whose `conf` is more than some bound relative
+  to `price`.
+- **Reentrancy (`executeFlow`).** Slither's reentrancy detector flags
+  `executeFlow` for writing state (`_advanceTrigger`,
+  `lastExecutedAt`) after the external calls its action handlers make.
+  This is a guarded false positive in context: `executeFlow` carries the
+  `nonReentrant` modifier, exactly as the
+  [Reentrancy](#protections-actually-in-the-code) protection above
+  already states, and Slither's detector doesn't factor that guard into
+  this particular check. Worth noting: Slither did **not** separately
+  flag `registerFlow` or `setFlowActive`, the two functions that same
+  section calls out as lacking a `nonReentrant` guard, consistent with
+  that section's own conclusion that their gap has no exploitable path.
+- **Divide-before-multiply (`CanalisSwapPool.swap` and
+  `CanalisSwapPool.quote`).** Both compute
+  `amountInWithFee = (amountIn * (10000 - 30)) / 10000` and then multiply
+  that division's result by `reserveOut`, the pattern this detector looks
+  for. This is the standard constant-product-AMM-with-fee formula, the
+  same shape Uniswap V2 uses. With a 10,000 basis-point denominator, the
+  truncation is at most about 1 part in 10,000 per swap, not a meaningful
+  precision issue.
+
+### Low and Informational
+
+The remaining findings are lower severity and briefly noted rather than
+detailed one by one: **`calls-loop`** (external calls inside a loop),
+mostly the `Split` action's per-recipient transfer loop, which ties back
+to the already-documented [lack of an explicit bound on recipient array
+length](#deliberate-scope-cuts--known-limitations); and **`timestamp`**
+(comparisons against `block.timestamp`), which is intentional throughout,
+used for schedule, staleness, and lock-time checks. One Informational
+finding is a minor pragma-version note.
+
+---
+
 ## Testing posture
 
 - **200 passing Foundry tests** across 14 test suites (confirmed via
