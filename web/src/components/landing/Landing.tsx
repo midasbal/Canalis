@@ -15,6 +15,8 @@ interface LandingProps {
   onEnter: () => void;
   /** True while a connect request is in flight, so the CTA can say "Connecting…" instead of sitting silent. */
   entering: boolean;
+  /** Same as onEnter, but also switches the app straight to the Docs tab once connected. See App.tsx. */
+  onEnterDocs: () => void;
 }
 
 /**
@@ -36,7 +38,7 @@ interface LandingProps {
  * every single seam (e.g. skipped right around Capabilities' own
  * border-y) to keep the repetition from reading as busy.
  */
-export function Landing({ onEnter, entering }: LandingProps) {
+export function Landing({ onEnter, entering, onEnterDocs }: LandingProps) {
   return (
     <div className="relative bg-brand-base font-sans text-brand-ink">
       <GrainOverlay />
@@ -57,7 +59,7 @@ export function Landing({ onEnter, entering }: LandingProps) {
         <WhyArc />
       </Reveal>
       <ArchDivider />
-      <LandingFooter onEnter={onEnter} entering={entering} />
+      <LandingFooter onEnter={onEnter} entering={entering} onEnterDocs={onEnterDocs} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
+import { Footer } from "../Footer";
 import { ChannelLine } from "../landing/ChannelLine";
 import { FlowDiagram } from "../landing/FlowDiagram";
 import { ChevronIcon } from "../ui/icons";
@@ -18,112 +19,123 @@ import { triggerTypeLabel } from "../../lib/flowSummary";
  */
 export function DocsPage() {
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-16 pb-6">
-      <header className="flex flex-col items-center gap-4 text-center">
-        <ChannelLine className="w-16 opacity-70" />
-        <div>
-          <p className="font-mono text-xs tracking-[0.16em] text-brand-bronze uppercase">Docs</p>
-          <h1 className="mt-2 font-display text-3xl font-medium text-brand-ink sm:text-4xl">
-            How{" "}
-            <span className="relative inline-block px-1">
-              <CanalisEngraving />
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute -inset-x-2 -inset-y-3 z-[1]"
-                style={{
-                  background:
-                    "radial-gradient(ellipse 65% 75% at 50% 50%, color-mix(in oklab, var(--color-brand-base) 60%, transparent) 0%, transparent 72%)",
-                }}
-              />
-              <span className="relative z-10">Canalis</span>
-            </span>{" "}
-            works
-          </h1>
-        </div>
-        <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
-          A plain-language explainer, not the full code story. For that, see the repo's README, ROADMAP, and
-          SECURITY.md.
-        </p>
-      </header>
+    <>
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-16 pb-6">
+        <header className="flex flex-col items-center gap-4 text-center">
+          <ChannelLine className="w-16 opacity-70" />
+          <div>
+            <p className="font-mono text-xs tracking-[0.16em] text-brand-bronze uppercase">Docs</p>
+            <h1 className="mt-2 font-display text-3xl font-medium text-brand-ink sm:text-4xl">
+              How{" "}
+              <span className="relative inline-block px-1">
+                <CanalisEngraving />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -inset-x-2 -inset-y-3 z-[1]"
+                  style={{
+                    background:
+                      "radial-gradient(ellipse 65% 75% at 50% 50%, color-mix(in oklab, var(--color-brand-base) 60%, transparent) 0%, transparent 72%)",
+                  }}
+                />
+                <span className="relative z-10">Canalis</span>
+              </span>{" "}
+              works
+            </h1>
+          </div>
+          <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
+            A plain-language explainer, not the full code story. For that, see the repo's README, ROADMAP, and
+            SECURITY.md.
+          </p>
+        </header>
 
-      <Section eyebrow="What it is" title="Programmable money, on your terms">
-        <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
-          Canalis lets you write a rule for your USDC once, deploy it to your own on-chain vault on Arc, and let it
-          run itself from then on: routing, splitting, sweeping, swapping, and settling money exactly the way you
-          described it, without you sending another transaction by hand.
-        </p>
-      </Section>
+        <Section eyebrow="What it is" title="Programmable money, on your terms">
+          <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
+            Canalis lets you write a rule for your USDC once, deploy it to your own on-chain vault on Arc, and let it
+            run itself from then on: routing, splitting, sweeping, swapping, and settling money exactly the way you
+            described it, without you sending another transaction by hand.
+          </p>
+        </Section>
 
-      <Section eyebrow="The model" title="A flow is trigger → condition → action">
-        <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
-          Every flow reads left to right, like water down a channel. A <span className="text-brand-ink">trigger</span>{" "}
-          is the source, the moment that starts things moving: a manual click, a schedule, an incoming payment, or a
-          balance crossing a threshold. <span className="text-brand-ink">Conditions</span> are the gates in between;
-          the flow only keeps moving if every gate lets it through. <span className="text-brand-ink">Actions</span>{" "}
-          are the outlets at the end, where the money actually goes and what happens to it. Compose a chain of these
-          on the canvas and it becomes a real, deployable rule.
-        </p>
-        <div className="mt-8 rounded-2xl border border-brand-bronze/15 bg-brand-surface/30 p-6 sm:p-10">
-          <FlowDiagram />
-        </div>
-      </Section>
+        <Section eyebrow="The model" title="A flow is trigger → condition → action">
+          <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
+            Every flow reads left to right, like water down a channel. A <span className="text-brand-ink">trigger</span>{" "}
+            is the source, the moment that starts things moving: a manual click, a schedule, an incoming payment, or a
+            balance crossing a threshold. <span className="text-brand-ink">Conditions</span> are the gates in between;
+            the flow only keeps moving if every gate lets it through. <span className="text-brand-ink">Actions</span>{" "}
+            are the outlets at the end, where the money actually goes and what happens to it. Compose a chain of these
+            on the canvas and it becomes a real, deployable rule.
+          </p>
+          <div className="mt-8 rounded-2xl border border-brand-bronze/15 bg-brand-surface/30 p-6 sm:p-10">
+            <FlowDiagram />
+          </div>
+        </Section>
 
-      <Section eyebrow="Get started" title="Build and deploy a flow">
-        <ol className="flex flex-col gap-3">
-          {WALKTHROUGH.map((step, i) => (
-            <li
-              key={step.title}
-              className="flex gap-4 rounded-xl border border-brand-bronze/15 bg-brand-surface/40 p-4 sm:p-5"
-            >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-brand-bronze/30 font-mono text-xs text-brand-bronze">
-                {i + 1}
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-brand-ink">{step.title}</p>
-                <p className="mt-1 max-w-prose text-sm leading-relaxed text-brand-muted">{step.detail}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </Section>
+        <Section eyebrow="Get started" title="Build and deploy a flow">
+          <ol className="flex flex-col gap-3">
+            {WALKTHROUGH.map((step, i) => (
+              <li
+                key={step.title}
+                className="flex gap-4 rounded-xl border border-brand-bronze/15 bg-brand-surface/40 p-4 sm:p-5"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-brand-bronze/30 font-mono text-xs text-brand-bronze">
+                  {i + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-brand-ink">{step.title}</p>
+                  <p className="mt-1 max-w-prose text-sm leading-relaxed text-brand-muted">{step.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Section>
 
-      <Section eyebrow="Reference" title="The building blocks">
-        <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
-          A compact reference of every block available on the canvas today.
-        </p>
-        <div className="mt-6 flex flex-col gap-8">
-          <BlockGroup title="Triggers" items={TRIGGER_BLOCKS} />
-          <BlockGroup title="Conditions" items={CONDITION_BLOCKS} />
-          <BlockGroup title="Actions" items={ACTION_BLOCKS} />
-        </div>
-      </Section>
+        <Section eyebrow="Reference" title="The building blocks">
+          <p className="max-w-prose text-sm leading-relaxed text-brand-muted sm:text-base">
+            A compact reference of every block available on the canvas today.
+          </p>
+          <div className="mt-6 flex flex-col gap-8">
+            <BlockGroup title="Triggers" items={TRIGGER_BLOCKS} />
+            <BlockGroup title="Conditions" items={CONDITION_BLOCKS} />
+            <BlockGroup title="Actions" items={ACTION_BLOCKS} />
+          </div>
+        </Section>
 
-      <Section eyebrow="Good to know" title="Testnet vs. mainnet, honestly">
-        <ul className="flex flex-col gap-3">
-          {HONEST_NOTES.map((note) => (
-            <li
-              key={note.title}
-              className="flex gap-3 rounded-xl border border-brand-bronze/15 bg-brand-surface/30 p-4 sm:p-5"
-            >
-              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-bronze" aria-hidden="true" />
-              <p className="max-w-prose text-sm leading-relaxed text-brand-muted">
-                <span className="font-medium text-brand-ink">{note.title}. </span>
-                {note.body}
-              </p>
-            </li>
-          ))}
-        </ul>
-      </Section>
+        <Section eyebrow="Good to know" title="Testnet vs. mainnet, honestly">
+          <ul className="flex flex-col gap-3">
+            {HONEST_NOTES.map((note) => (
+              <li
+                key={note.title}
+                className="flex gap-3 rounded-xl border border-brand-bronze/15 bg-brand-surface/30 p-4 sm:p-5"
+              >
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-bronze" aria-hidden="true" />
+                <p className="max-w-prose text-sm leading-relaxed text-brand-muted">
+                  <span className="font-medium text-brand-ink">{note.title}. </span>
+                  {note.body}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </Section>
 
-      <Section eyebrow="FAQ" title="Common questions">
-        <div className="flex flex-col gap-2">
-          {FAQS.map((faq) => (
-            <FaqItem key={faq.q} q={faq.q} a={faq.a} />
-          ))}
-        </div>
-      </Section>
-    </div>
+        <Section eyebrow="FAQ" title="Common questions">
+          <div className="flex flex-col gap-2">
+            {FAQS.map((faq) => (
+              <FaqItem key={faq.q} q={faq.q} a={faq.a} />
+            ))}
+          </div>
+        </Section>
+      </div>
+
+      <footer className="-mx-4 mt-16 border-t border-brand-bronze/15 sm:-mx-6 md:-mx-8">
+        <Footer onDocsClick={scrollDocsToTop} />
+      </footer>
+    </>
   );
+}
+
+/** The "Docs" footer link's action on the docs page itself, since it's already there: scrolls the scrollable content area (App.tsx's <main>) back to top instead of navigating anywhere. */
+function scrollDocsToTop() {
+  document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 // ---------------------------------------------------------------------

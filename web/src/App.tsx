@@ -45,6 +45,12 @@ function App() {
     connect({ connector: connectors[0] });
   }
 
+  /** Same as handleEnter, but also points the app at the Docs tab, for the landing footer's "Docs" link (Docs only exists inside the connected app). */
+  function handleEnterDocs() {
+    setTab("docs");
+    handleEnter();
+  }
+
   function handleTabChange(next: Tab) {
     setTab(next);
     setMobileNavOpen(false);
@@ -56,7 +62,7 @@ function App() {
   }
 
   if (showLanding) {
-    return <Landing onEnter={handleEnter} entering={isPending} />;
+    return <Landing onEnter={handleEnter} entering={isPending} onEnterDocs={handleEnterDocs} />;
   }
 
   return (
