@@ -209,11 +209,17 @@ Stated plainly, not buried:
   chain-agnostic and explicitly not checked against
   `allowedRecipients`/`deniedRecipients`. **Use the amount-cap condition**
   to bound a Bridge action's exposure instead.
-- **Single-account keeper.** The keeper (`keeper/`) services exactly one
-  configured `CANALIS_ACCOUNT` via `flowsOf` — there's no on-chain "every
-  account, every flow" enumeration function. Multi-account support is
-  roadmap, not implemented (would need either a new factory-side view or
-  an off-chain list of accounts to poll).
+- **Keeper flow discovery costs one `eth_call` per flow, per poll.** The
+  keeper is multi-account (see `keeper/README.md` "Flow discovery"): it
+  scans `CanalisExecutor`'s global flow-id space directly via `getFlow`
+  rather than looking up one configured account, so it services every
+  account automatically. The tradeoff is scale, not correctness: every
+  poll re-checks `previewFlow` for every flow ever registered, system-wide,
+  and extending the scan's frontier costs one `eth_call` per newly
+  discovered flow id. Fine at demo scale (single-digit or low-double-digit
+  flow counts); a real multi-user deployment would want to batch these
+  calls (e.g. `multicall`) or add a proper on-chain `totalFlows()`/
+  pagination view instead of one call per flow, per poll, forever.
 - **NL-proxy rate limits are in-memory.** The natural-language flow
   builder's anti-abuse counters (`web/api/_lib/generateFlow.ts`) are
   plain module-scope state — real, and verified live, but they reset on

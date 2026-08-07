@@ -6,7 +6,7 @@
 
 **IFTTT for your money, on rails that settle in under a second.**
 
-Built solo for the **Programmable Money Hackathon — Build on Arc**. Primary
+Built solo for the **Programmable Money Hackathon: Build on Arc**. Primary
 track: **DeFi**. Secondary track: **Agentic Economy**, via a
 [natural-language flow builder](#natural-language-flow-builder) where an LLM
 drafts on-chain USDC flows from plain-English intent for a human to review
@@ -109,7 +109,7 @@ Canalis does **not** deploy a new contract per flow. There is one generic
 
 - **`CanalisExecutor`** — `registerFlow` stores a flow; `executeFlow`
   validates the trigger, evaluates every condition, then runs the action
-  list atomically in a single transaction. One audited contract instead of
+  list atomically in a single transaction. One shared contract instead of
   one deployment per flow: cheaper, easier to secure, and new block types
   can be added as new handlers instead of new contracts.
 - **`CanalisAccount`** — a per-user vault that custodies USDC. `executor` is
@@ -275,7 +275,7 @@ canalis/
 │   └── .env.example                        # RPC_URL / PRIVATE_KEY placeholders
 ├── keeper/                         # standalone Node/TS + viem keeper service
 │   ├── src/
-│   │   ├── index.ts                        # poll loop: flowsOf + previewFlow (getLogs-free), poke executeFlow, refresh stale oracle prices, tolerate reverts
+│   │   ├── index.ts                        # poll loop: global flow-id frontier scan (getFlow-based, getLogs-free, covers every account) + previewFlow, poke executeFlow, refresh stale oracle prices, tolerate reverts
 │   │   ├── abi.ts / chain.ts / config.ts    # minimal executor + IPyth ABI, Arc testnet chain def, env config
 │   ├── scripts/
 │   │   └── complete-cctp-bridge.ts         # standalone: polls Circle's real attestation API, completes the mint on Ethereum Sepolia
@@ -287,24 +287,36 @@ canalis/
     ├── src/
     │   ├── chains.ts / wagmi.ts             # Arc testnet chain + rate-limit-aware wagmi transport
     │   ├── lib/
-    │   │   ├── flows.ts                     # TS mirror of the Solidity flow model + encode/decode
+    │   │   ├── flows.ts                     # TS mirror of the Solidity flow model
     │   │   ├── oracleFeeds.ts                # curated real Pyth feed id catalog (production Hermes ids)
+    │   │   ├── oracleRefresh.ts              # fetches a fresh signed price update from production Hermes
     │   │   ├── bridgeDestinations.ts          # curated CCTP V2 destination-chain catalog (Ethereum Sepolia)
     │   │   ├── abi.ts                       # hand-maintained ABI subset for the contracts above (incl. CanalisSwapPool, IPyth)
     │   │   ├── composer.ts                  # composer draft state -> Flow, validation
     │   │   ├── nlDraft.ts                    # converts the NL proxy's flat LLM JSON into a real ComposerDraft; resolves "SELF" to the connected wallet client-side
+    │   │   ├── nodeSummary.ts                # per-node plain-English labels for the channel-canvas builder
     │   │   ├── flowSummary.ts               # plain-English flow/action summaries
+    │   │   ├── templates.ts                 # one-click starting drafts (treasury-rebalance, recurring DCA)
+    │   │   ├── format.ts                    # USDC/address/date formatting shared across the UI
+    │   │   ├── errors.ts                    # decodes on-chain revert reasons into plain user-facing error text
+    │   │   ├── rateLimitedTransport.ts       # viem transport wrapper: concurrency limit + retry-with-backoff for the public Arc RPC
     │   │   ├── contracts.ts                 # deployed-address env lookup
-    │   │   └── useCanalisAccount.ts         # resolves the connected wallet's CanalisAccount
+    │   │   ├── useCanalisAccount.ts         # resolves the connected wallet's CanalisAccount
+    │   │   ├── useRunLog.ts                 # fetches/decodes FlowExecuted + ActionExecuted history for the run log
+    │   │   ├── useNowSeconds.ts             # ticking "now", powers live countdowns
+    │   │   └── useReducedMotion.ts          # tracks prefers-reduced-motion for the landing/canvas animations
     │   ├── components/
-    │   │   ├── Header.tsx                   # wordmark + tab nav + wallet connect
+    │   │   ├── Sidebar.tsx                  # persistent left sidebar: Builder / Flows / Docs nav + a pinned vault/wallet panel
     │   │   ├── WalletConnect.tsx             # injected-wallet connect/disconnect
+    │   │   ├── Footer.tsx                   # shared footer used by the landing page and the Docs page
     │   │   ├── BuilderCanvas.tsx             # hosts the flow composer
-    │   │   ├── composer/                    # stepper composer: trigger/conditions/actions sections, templates, NlBuilderPanel.tsx ("Describe your flow")
+    │   │   ├── composer/                    # ChannelCanvas.tsx (the channel-canvas builder, see Status) plus trigger/conditions/actions section editors, templates, NlBuilderPanel.tsx ("Describe your flow")
+    │   │   ├── docs/                        # in-app Docs page: how flows work, a building-blocks reference, an FAQ
+    │   │   ├── landing/                     # pre-connect marketing landing page (hero, how-it-works, capabilities, footer)
     │   │   ├── DeployedFlows.tsx / FlowRow.tsx # deployed-flows list, pause/run-now, live previewFlow status
     │   │   ├── RunLog.tsx                   # FlowExecuted/ActionExecuted history, "ran automatically" detection
     │   │   ├── Dashboard.tsx                # account/balance + deployed flows + run log
-    │   │   └── ui/                          # Card, Badge, EmptyState, etc.
+    │   │   └── ui/                          # Card, Badge, EmptyState, ToastProvider.tsx (pending/success/error transaction toasts), etc.
     │   └── index.css                       # Tailwind v4 theme (dark, "channel" palette)
     ├── vite.config.ts                       # also wires up the NL proxy's dev-mode middleware (see api/)
     └── .env.example                         # RPC/deployed-contract placeholders + the NL proxy's server-only env vars (GROQ_API_KEY etc. — never VITE_-prefixed)
@@ -424,27 +436,31 @@ canalis/
   submitted `MessageTransmitterV2.receiveMessage` on Ethereum Sepolia — the
   recipient's real Sepolia USDC balance went from `0` to `1000000`
   (1.000000 USDC). A genuine two-chain proof, not just a burn.
-- A real off-chain **keeper** (`keeper/`, Node/TS + viem) — **entirely
-  `getLogs`-free**: discovers a configured `CanalisAccount`'s flows via
-  `flowsOf` (one `eth_call`), dry-runs each via `previewFlow`, and pokes
-  `executeFlow` only when `canRun` — every step a plain `eth_call`, so it
-  never hits free-tier RPC `getLogs` range caps (an earlier version
-  indexed `FlowRegistered` via `getLogs` and was replaced for exactly this
-  reason). Skips `Manual` flows entirely — `previewFlow`'s owner-only
-  check naturally reports `canRun=false` for the keeper, since it's never
-  the account owner. Proven live on Arc testnet driving a short-interval
-  `OnSchedule` flow to fire with no human interaction; see
-  `keeper/README.md` for how to run it and the trust model (a hot key
-  that only ever calls `executeFlow`; the contract, not the caller, is
-  what's trusted). Also keeps the oracle price condition's price fresh:
-  before evaluating a flow that carries one, it checks the on-chain
-  price's age against that flow's `maxStaleness` and, only if stale,
-  fetches a real signed update from Pyth's production Hermes API and
-  submits it (`updatePriceFeeds`, paying the real fee) — proven live: the
-  keeper autonomously refreshed the on-chain EUR/USD price and executed
-  an `OnSchedule` + oracle-conditioned flow with zero human interaction.
-  Services one configured account — multi-account enumeration is future
-  work.
+- A real off-chain **keeper** (`keeper/`, Node/TS + viem), **entirely
+  `getLogs`-free** and **multi-account**: `CanalisExecutor` assigns every
+  flow id from one sequential counter shared across every `CanalisAccount`,
+  and `getFlow`/`previewFlow`/`executeFlow` all take a bare `flowId` with no
+  owner parameter, so the keeper scans the executor's own flow-id space
+  directly (a `getFlow`-based frontier probe that stops cleanly at the
+  "unknown flow" revert) instead of looking up one configured account's
+  flows. That means it discovers and pokes every account's due flows
+  automatically, not just an operator's own. Every step is a plain
+  `eth_call`, so it never hits free-tier RPC `getLogs` range caps (an
+  earlier version indexed `FlowRegistered` via `getLogs` and was replaced
+  for exactly this reason). Skips `Manual` flows entirely, since
+  `previewFlow`'s owner-only check naturally reports `canRun=false` for the
+  keeper, as it's never the account owner. Proven live on Arc testnet
+  driving a short-interval `OnSchedule` flow to fire with no human
+  interaction; see `keeper/README.md` for how to run it, the flow-discovery
+  mechanics, and the trust model (a hot key that only ever calls
+  `executeFlow`; the contract, not the caller, is what's trusted). Also
+  keeps the oracle price condition's price fresh: before evaluating a flow
+  that carries one, it checks the on-chain price's age against that flow's
+  `maxStaleness` and, only if stale, fetches a real signed update from
+  Pyth's production Hermes API and submits it (`updatePriceFeeds`, paying
+  the real fee); proven live, the keeper autonomously refreshed the
+  on-chain EUR/USD price and executed an `OnSchedule` + oracle-conditioned
+  flow with zero human interaction.
 - **Pause/cancel** — `setFlowActive(flowId, active)`, owner-only (same
   auth model as Manual's `executeFlow`), emits `FlowActiveSet`. Blocks
   execution for every trigger type identically — a paused flow's
@@ -494,20 +510,26 @@ canalis/
   Swap, and Bridge actions (the latter against a `MockTokenMessengerV2`),
   pause, enriched events, preview, per-owner enumeration, `CanalisSwapPool`,
   `CanalisAccount`, and `CanalisAccountFactory`.
-- Frontend: a real visual flow **composer** (stepper: trigger → conditions
-  → actions, including a Swap block with a live pool-quote-driven
-  slippage control, an oracle price condition block showing the live
-  Pyth price for the selected feed, and a Bridge block for burning USDC to
-  Ethereum Sepolia via CCTP V2), a **deployed-flows list** with
-  pause/resume and run-now (both real transactions, guarded against
-  double-submit, with decoded on-chain revert reasons), live
-  `previewFlow`-backed status per flow, and a **run log** built from real
-  `FlowExecuted`/`ActionExecuted` events — including an honest "ran
-  automatically" detection (compares each event's real `triggeredBy`
-  against the connected wallet — an on-chain fact, not a guess). Reads go
-  through a throttled/retrying RPC transport with a keyed-endpoint
-  override, since the public Arc RPC (and most free-tier keyed ones) cap
-  `eth_getLogs` hard.
+- Frontend: a real visual flow **composer**, drawn as a channel-canvas (a
+  left-to-right aqueduct-style diagram: the trigger is the source,
+  conditions are gates along the middle, actions are outlets at the end,
+  with a state-reflective flow animation showing live whether the flow can
+  run). It includes a Swap block with a live pool-quote-driven slippage
+  control, an oracle price condition block showing the live Pyth price for
+  the selected feed, and a Bridge block for burning USDC to Ethereum
+  Sepolia via CCTP V2. A **deployed-flows list** shows pause/resume and
+  run-now (both real transactions, guarded against double-submit, surfaced
+  via toast notifications for pending/success/error state, with decoded
+  on-chain revert reasons) plus live `previewFlow`-backed status per flow,
+  and a **run log** is built from real `FlowExecuted`/`ActionExecuted`
+  events, including an honest "ran automatically" detection (compares each
+  event's real `triggeredBy` against the connected wallet, an on-chain
+  fact, not a guess). An in-app **Docs page** explains the
+  trigger/condition/action model with an FAQ, and a shared **footer**
+  appears on the landing page and the Docs page. Reads go through a
+  throttled/retrying RPC transport with a keyed-endpoint override, since
+  the public Arc RPC (and most free-tier keyed ones) cap `eth_getLogs`
+  hard.
 
 ### Stubbed (explicit reverts / honest "Coming soon" UI — never faked)
 

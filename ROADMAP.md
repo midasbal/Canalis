@@ -19,7 +19,7 @@ A visual + AI-assisted builder for programmable USDC money-flows on Arc, with a 
   2. A **live-oracle price condition** reading Pyth's real, production-guardian-verified feed on Arc testnet.
   3. A **CCTP V2 Bridge action** — proven with a full round trip, burn on Arc → real Circle attestation → mint on Ethereum Sepolia.
   4. & 5. **Treasury-rebalance** and **recurring-DCA** one-click composite templates, built from (1) + (2).
-- **An autonomous off-chain keeper** (`keeper/`) driving the caller-agnostic triggers and keeping the on-chain oracle price fresh, plus **Telegram flow-run notifications** on every confirmed successful execution.
+- **An autonomous, multi-account off-chain keeper** (`keeper/`) driving the caller-agnostic triggers and keeping the on-chain oracle price fresh, plus **Telegram flow-run notifications** on every confirmed successful execution. Discovers flows via a global flow-id frontier scan (`getFlow`-based, `getLogs`-free), not a per-account lookup, so it services every account automatically, not just one configured one.
 - **A natural-language (AI) flow builder** — an LLM (Groq) drafts a flow from plain English into the existing composer for a human to review and deploy; the key stays server-side, four anti-abuse limits are enforced, and the model never invents addresses or auto-deploys.
 - **200 Foundry tests** (17 fuzz), all three deployed contracts **verified** (full match) on the Arc explorer, and a real [SECURITY.md](SECURITY.md) threat model — never claimed "audited."
 - **Dual-track fit:** DeFi (primary) + Agentic Economy (secondary, via the AI flow builder).
@@ -30,7 +30,6 @@ See [README.md](README.md) for the full architecture, repo layout, and exact "St
 
 ## Next: productionizing for a public multi-user launch
 
-- **Multi-account keeper** — autonomous execution for every user's flows, not just the operator's. Keeper-only change (a new enumeration path or a config list of accounts to poll); no contract change needed.
 - **Per-user notifications** — a "connect your Telegram" flow so each user gets their own pings, instead of today's single operator chat.
 - **Flow management** — delete/archive, clone/duplicate, and per-flow run stats.
 - **A consolidated home/treasury dashboard** — balances, active flows, and next-run-at, all at a glance.

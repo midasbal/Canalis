@@ -116,7 +116,7 @@ Each poll (`pollOnce`):
    (`getPriceUnsafe`) and checks its age against that requirement.
 3. Only for feeds that are actually stale (or have never been pushed
    on-chain at all) does it fetch a fresh signed update from Pyth's Hermes
-   API (`HERMES_URL`, default `https://hermes-beta.pyth.network`) and
+   API (`HERMES_URL`, default `https://hermes.pyth.network`) and
    submit it via `oracle.updatePriceFeeds(updateData)`, paying
    `oracle.getUpdateFee(updateData)` in the chain's native gas token.
 4. Then proceeds with the normal `previewFlow` → `executeFlow` loop as
