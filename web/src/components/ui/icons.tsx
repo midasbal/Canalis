@@ -1,14 +1,5 @@
 /** Small hand-drawn line icons — kept in-repo to avoid an icon-library dependency. */
 
-export function CoinIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M9.5 15.5c0 1 1 1.5 2.5 1.5s2.5-.6 2.5-1.6c0-2.4-5-1-5-3.4 0-1 1-1.6 2.5-1.6s2.5.5 2.5 1.5M12 7v1.2M12 15.8V17" />
-    </svg>
-  );
-}
-
 export function FlowIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">

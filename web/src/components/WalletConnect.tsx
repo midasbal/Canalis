@@ -1,4 +1,5 @@
 import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { shortAddress } from "../lib/format";
 
 /** Connect/disconnect button for the injected wallet on Arc testnet. */
 export function WalletConnect() {
@@ -11,7 +12,7 @@ export function WalletConnect() {
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1.5 rounded-full border border-brand-bronze/20 bg-brand-surface px-3 py-1.5 font-mono text-xs text-brand-muted">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          {address.slice(0, 6)}…{address.slice(-4)}
+          {shortAddress(address)}
         </span>
         <button
           onClick={() => disconnect()}

@@ -1,4 +1,3 @@
-import { decodeAbiParameters, encodeAbiParameters } from "viem";
 import type { Address, Hex } from "viem";
 
 /**
@@ -165,20 +164,3 @@ export const flowAbiParameter = {
     { name: "lastExecutedAt", type: "uint256" },
   ],
 } as const;
-
-/**
- * Encode a Flow into the ABI-encoded tuple bytes CanalisExecutor's
- * `registerFlow`/`getFlow` operate on. Not required for calling
- * `registerFlow` via wagmi (which encodes typed struct args itself), but
- * useful standalone — e.g. the Builder's "encoded flow" preview, or future
- * flow import/export.
- */
-export function encodeFlow(flow: Flow): Hex {
-  return encodeAbiParameters([flowAbiParameter], [flow]);
-}
-
-/** Decode a Flow previously encoded with `encodeFlow`. */
-export function decodeFlow(data: Hex): Flow {
-  const [decoded] = decodeAbiParameters([flowAbiParameter], data);
-  return decoded as Flow;
-}
