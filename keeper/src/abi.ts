@@ -1,10 +1,12 @@
 // Minimal ABI slice of CanalisExecutor — just what the keeper needs:
-// enumerate one account's flows via flowsOf, dry-run each via previewFlow,
-// and call executeFlow when it's due. Entirely eth_call-based — no
-// getLogs, so it's immune to the tiny getLogs range caps free-tier RPCs
-// impose (QuickNode as low as 5 blocks, Alchemy 10). Mirrors
-// contracts/src/interfaces/ICanalisExecutor.sol exactly; keep in sync with
-// it on every executor redeploy.
+// discover every account's flows via a global getFlow(id) frontier scan
+// (see index.ts's extendFrontier), dry-run each via previewFlow, and call
+// executeFlow when it's due. `flowsOf` is kept here too (unused by the
+// poll loop itself) since it's still useful for targeting one account
+// manually. Entirely eth_call-based — no getLogs, so it's immune to the
+// tiny getLogs range caps free-tier RPCs impose (QuickNode as low as 5
+// blocks, Alchemy 10). Mirrors contracts/src/interfaces/ICanalisExecutor.sol
+// exactly; keep in sync with it on every executor redeploy.
 
 // `condition` tuple, mirroring FlowTypes.Condition field-for-field (see
 // contracts/src/libraries/FlowTypes.sol / web/src/lib/flows.ts's identical

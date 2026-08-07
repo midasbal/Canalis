@@ -28,23 +28,44 @@ native gas token, when it refreshes a price).
 
 ## Flow discovery
 
-`CanalisExecutor` has no on-chain "list every flow across every owner"
-function, so this keeper services **one configured account**
-(`CANALIS_ACCOUNT`) and discovers its flows via `flowsOf(CANALIS_ACCOUNT)` —
-a single `eth_call`, not a log scan. On every poll, each returned flow ID
-goes through `previewFlow(id)`; if `canRun` is `true`, the keeper sends
-`executeFlow(id)`.
+`CanalisExecutor` assigns every flow id from one sequential counter shared
+across every `CanalisAccount` (`registerFlow` does `flowId = _nextFlowId++`
+regardless of which account owns the flow), and `getFlow`/`previewFlow`/
+`executeFlow` all take a bare `flowId`, no owner parameter. That means
+every account's flows can be found directly, with no need to enumerate
+accounts at all: this keeper scans the executor's flow-id space itself,
+watching every account automatically, not just one.
 
-This is deliberately **not** event-log-based (an earlier version indexed
-`FlowRegistered` via `eth_getLogs`). Free-tier RPCs cap `getLogs` far too
-tight to scan reliably in practice (QuickNode as low as 5 blocks, Alchemy
-10) — `flowsOf`/`previewFlow`/`executeFlow` are all plain `eth_call`s, so
-this keeper is completely immune to that cap.
+It keeps a remembered `knownFlowCount` in memory and extends it forward on
+startup and on every poll, calling `getFlow(id)` for successive ids
+starting exactly where the last scan stopped. `getFlow` reverts with
+"CanalisExecutor: unknown flow" the moment `id` hasn't been registered
+yet; that revert is the expected end-of-scan signal, not an error, and the
+scan simply stops there for this poll. Flow slots are never deleted
+(`setFlowActive` only flips a boolean), so once an id is confirmed valid
+it never needs checking again, `knownFlowCount` only ever grows. Every id
+in `[0, knownFlowCount)` then goes through `previewFlow(id)`, same as
+before; if `canRun` is `true`, the keeper sends `executeFlow(id)`.
 
-The tradeoff: servicing multiple accounts would mean either a second
-on-chain enumeration mechanism (e.g. an `allAccounts()` view on the
-factory) or a config list of accounts to poll — fine for the single-user
-demo as-is; multi-account support is future work, not implemented here.
+This is entirely `eth_call`-based (`getFlow`/`previewFlow`/`executeFlow`),
+so it stays just as immune to tight `getLogs` block-range caps as the
+single-account version before it. This is deliberately **not**
+event-log-based (an earlier version indexed `FlowRegistered` via
+`eth_getLogs`) since free-tier RPCs cap `getLogs` far too tight to scan
+reliably in practice (QuickNode as low as 5 blocks, Alchemy 10).
+
+`CANALIS_ACCOUNT` is no longer used for flow discovery and is optional;
+`flowsOf(owner)` is still available on the contract for targeting one
+account manually, just not part of the poll loop anymore.
+
+**Tradeoff at scale.** Every poll re-checks `previewFlow` for every flow
+ever registered, system-wide, and extending the frontier costs one
+`eth_call` per newly discovered flow id. Fine at demo scale (single-digit
+or low-double-digit flow counts); a real multi-user deployment would want
+to batch these calls (e.g. `multicall`) or add a proper on-chain
+`totalFlows()`/pagination view instead of one call per flow, per poll,
+forever (see ROADMAP.md's "productionizing for a public multi-user
+launch").
 
 ## Running it
 
@@ -52,7 +73,7 @@ demo as-is; multi-account support is future work, not implemented here.
 cd keeper
 npm install
 cp .env.example .env
-# edit .env: RPC_URL, EXECUTOR_ADDRESS, CANALIS_ACCOUNT, KEEPER_PRIVATE_KEY, POLL_INTERVAL_MS
+# edit .env: RPC_URL, EXECUTOR_ADDRESS, KEEPER_PRIVATE_KEY, POLL_INTERVAL_MS
 npm start
 ```
 
@@ -193,7 +214,7 @@ keeper logs this once on startup and runs exactly as before otherwise; it
 is never a hard requirement.
 
 **What you'll see:**
-- On startup (if enabled): `🟢 Canalis keeper started, watching N flow(s)`.
+- On startup (if enabled): `🟢 Canalis keeper started, watching N flow(s) across all accounts`.
 - On every successful autonomous execution:
   ```
   ✅ Flow #6 ran automatically
@@ -213,8 +234,8 @@ swallowed — it can never crash or stall the poll loop (see `src/notify.ts`).
 - It never touches Manual-trigger flows.
 - It does not retry failed sends beyond the next poll cycle; a transient RPC
   error is logged and the loop continues at the next interval.
-- It does not enumerate flows across multiple CanalisAccounts — see "Flow
-  discovery" above.
+- It does not route Telegram notifications per user; every autonomous run
+  across every account still pings the same single operator chat.
 - It does not notify on skips, "not due" reverts, or failed executions —
   only on a confirmed successful `executeFlow` (see "Telegram
   notifications" above).

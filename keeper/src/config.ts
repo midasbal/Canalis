@@ -9,11 +9,12 @@ function requireEnv(name: string): string {
 export const config = {
   rpcUrl: requireEnv("RPC_URL"),
   executorAddress: requireEnv("EXECUTOR_ADDRESS") as `0x${string}`,
-  // The CanalisAccount this keeper services. Flows are enumerated via
-  // flowsOf(canalisAccount) — an eth_call, not a log scan — so this keeper
-  // only ever needs to know about ONE account's flows. See README.md
-  // "Flow discovery" for why (and what multi-account support would need).
-  canalisAccount: requireEnv("CANALIS_ACCOUNT") as `0x${string}`,
+  // Optional, and no longer used for flow discovery: the keeper scans
+  // CanalisExecutor's global flow-id space directly (see index.ts "Flow
+  // discovery"), which covers every CanalisAccount automatically, not
+  // just one. Kept around only in case a future one-account-only use
+  // wants it; unset is fine, the keeper never crashes on its absence.
+  canalisAccount: process.env.CANALIS_ACCOUNT as `0x${string}` | undefined,
   keeperPrivateKey: requireEnv("KEEPER_PRIVATE_KEY") as `0x${string}`,
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? "60000"),
   // Pyth's real IPyth contract on Arc testnet — see CLAUDE.md / Deploy.s.sol.

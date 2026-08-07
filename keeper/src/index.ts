@@ -17,11 +17,18 @@ import { describeFlow } from "./flowSummary.ts";
 // (its owner-only check reports canRun=false for any caller that isn't
 // the account's human owner, which this keeper never is).
 //
-// Flow discovery: flowsOf(CANALIS_ACCOUNT) — a single eth_call, not a
-// getLogs scan. CanalisExecutor has no on-chain "list every flow across
-// every owner" function, so this keeper services ONE configured account
-// (see README.md "Flow discovery" for why, and what multi-account support
-// would need).
+// Flow discovery: a global flow-id scan, not flowsOf(one account) and not
+// a getLogs scan. CanalisExecutor assigns every flow id from ONE
+// sequential counter shared across every CanalisAccount, and
+// getFlow/previewFlow/executeFlow all take a bare flowId with no owner
+// scoping, so this keeper can discover and poke every account's flows
+// without ever knowing which accounts exist, still purely via eth_call.
+// See extendFrontier() below and README.md "Flow discovery" for the
+// mechanics and its tradeoffs at scale.
+//
+// Telegram notifications (see notify.ts) still go to a single operator
+// chat for every autonomous run across every account — per-user routing
+// is roadmap, not implemented here (see ROADMAP.md).
 //
 // ORACLE FRESHNESS (Arc-native feature, spec section 7.3 #2): before poking
 // any flow, the keeper checks whether any of that poll's flows carry an
@@ -234,13 +241,64 @@ async function refreshStaleOraclePrices(flowIds: readonly bigint[]) {
   }
 }
 
+/**
+ * How many flow ids are known to exist, i.e. `getFlow` on every id in
+ * `[0, knownFlowCount)` is known to succeed. Grows monotonically: flow
+ * slots are never deleted (`setFlowActive` only flips a bool, it never
+ * clears `_flows[id].owner`), so once an id is confirmed valid it stays
+ * valid forever and never needs re-checking. Lives only in this process's
+ * memory, not on disk — a keeper restart just re-discovers from 0 via
+ * extendFrontier() below, which is cheap at this project's scale (see
+ * README.md "Flow discovery").
+ */
+let knownFlowCount = 0n;
+
+/**
+ * Extends knownFlowCount past its current value by probing `getFlow` for
+ * successive flow ids, one eth_call at a time, starting exactly where the
+ * last probe left off. CanalisExecutor assigns flow ids from one global
+ * counter shared by every CanalisAccount (`_nextFlowId`, incremented on
+ * every registerFlow regardless of owner), so this single scan covers
+ * every account's flows, not just one, with zero knowledge of which
+ * accounts exist and zero getLogs calls.
+ *
+ * Stops the instant `getFlow` reverts with the executor's own
+ * "unknown flow" guard (the `flowExists` modifier) — that revert IS the
+ * expected end-of-scan signal, the same way a `previewFlow`
+ * "not due"/"threshold not met" revert is an expected, logged-not-erred
+ * outcome elsewhere in this file, not a failure. Any OTHER error (a
+ * transient RPC/transport failure) propagates instead, so the caller can
+ * back off and retry the SAME id next poll rather than silently treating
+ * a network hiccup as "no more flows" and truncating the scan early.
+ */
+async function extendFrontier(): Promise<void> {
+  for (;;) {
+    try {
+      await publicClient.readContract({
+        address: config.executorAddress,
+        abi: canalisExecutorAbi,
+        functionName: "getFlow",
+        args: [knownFlowCount],
+      });
+      knownFlowCount += 1n;
+    } catch (err) {
+      if (isUnknownFlowRevert(err)) return; // reached the frontier — expected, not an error
+      throw err;
+    }
+  }
+}
+
+function isUnknownFlowRevert(err: unknown): boolean {
+  return extractRevertReason(err).includes("CanalisExecutor: unknown flow");
+}
+
+function allKnownFlowIds(): bigint[] {
+  return Array.from({ length: Number(knownFlowCount) }, (_, i) => BigInt(i));
+}
+
 async function pollOnce() {
-  const flowIds = await publicClient.readContract({
-    address: config.executorAddress,
-    abi: canalisExecutorAbi,
-    functionName: "flowsOf",
-    args: [config.canalisAccount],
-  });
+  await extendFrontier();
+  const flowIds = allKnownFlowIds();
 
   await refreshStaleOraclePrices(flowIds);
 
@@ -262,19 +320,14 @@ process.on("SIGTERM", () => {
 
 async function main() {
   log(
-    `canalis-keeper starting: executor=${config.executorAddress} account=${config.canalisAccount} keeper=${account.address} pollIntervalMs=${config.pollIntervalMs}`,
+    `canalis-keeper starting: executor=${config.executorAddress} keeper=${account.address} pollIntervalMs=${config.pollIntervalMs} (watching all accounts via a global flow-id scan)`,
   );
   logDisabledNoticeOnce(log);
 
   if (telegramEnabled()) {
     try {
-      const flowIds = await publicClient.readContract({
-        address: config.executorAddress,
-        abi: canalisExecutorAbi,
-        functionName: "flowsOf",
-        args: [config.canalisAccount],
-      });
-      await notifyTelegram(`🟢 Canalis keeper started, watching ${flowIds.length} flow(s)`, log);
+      await extendFrontier();
+      await notifyTelegram(`🟢 Canalis keeper started, watching ${knownFlowCount} flow(s) across all accounts`, log);
     } catch (err) {
       log(`startup telegram ping skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
